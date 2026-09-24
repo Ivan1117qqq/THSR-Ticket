@@ -39,7 +39,7 @@ BOOKING_RESULT: Mapping[str, Any] = {
         "attrs": {"class": "payment-status"}
     },
     "phone": {
-        "text": "行動電話"
+        "string": "行動電話"
     },
     "info": {
         "name": "table",
@@ -48,14 +48,14 @@ BOOKING_RESULT: Mapping[str, Any] = {
         }
     },
     "outbound_info": {
-        "text": "去程"
+        "string": "去程"
     },
     "seat_class": {
-        "text": "車廂",
+        "string": "車廂",
     },
     "ticket_num": {
         "name": "p",
-        "text": "票數"
+        "string": "票數"
     },
     "total_price": {
         "id": "setTrainTotalPriceValue"

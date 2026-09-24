@@ -11,7 +11,7 @@ class HTTPConfig:
         ACCEPT_HTML = "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"
         ACCEPT_IMG = "image/webp,*/*"
         ACCEPT_LANGUAGE = "zh-TW,zh;q=0.8,en-US;q=0.5,en;q=0.3"
-        ACCEPT_ENCODING = "gzip, deflate, br"
+        ACCEPT_ENCODING = "gzip, deflate"
 
         # Host URL
         BOOKING_PAGE_HOST = "irs.thsrc.com.tw"

@@ -1,7 +1,7 @@
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Mapping, Any
 
-from jsonschema import validate
+from jsonschema import validate, ValidationError
 
 from thsr_ticket.model.web.abstract_params import AbstractParams
 from thsr_ticket.configs.web.param_schema import BOOKING_SCHEMA
@@ -42,7 +42,7 @@ class BookingForm(AbstractParams):
         self.security_code: str = None  # Required
 
         # Auto set
-        self.seat_prefer: str = None
+        self._seat_prefer: str = None
 
     def get_params(self, val: bool = True) -> Mapping[str, Any]:
         if self.inbound_date is None:
@@ -110,11 +110,20 @@ class BookingForm(AbstractParams):
         self._class_type = value
 
     @property
-    def search_by(self) -> int:
+    def seat_prefer(self) -> str:
+        return self._seat_prefer
+
+    @seat_prefer.setter
+    def seat_prefer(self, value: str) -> None:
+        self._validate_value('seatCon:seatRadioGroup', value)
+        self._seat_prefer = value
+
+    @property
+    def search_by(self) -> str:
         return self._search_by
 
     @search_by.setter
-    def search_by(self, value: int) -> None:
+    def search_by(self, value: str) -> None:
         self._validate_value("bookingMethod", value)
         self._search_by = value
 
@@ -125,7 +134,7 @@ class BookingForm(AbstractParams):
     @outbound_date.setter
     def outbound_date(self, value: str) -> None:
         date = self._validate_date(value)
-        if (date-datetime.now()) < timedelta(seconds=60):
+        if date.date() < datetime.now().date():
             raise ValueError("Departure date should not be earlier than today")
         self._outbound_date = value
 
@@ -210,8 +219,7 @@ class BookingForm(AbstractParams):
         return datetime.strptime(value, '%Y/%m/%d')
 
     def _validate_value(self, proper: str, value: Any) -> None:
-        if (
-            (enums := BOOKING_SCHEMA["properties"][proper].get('enum'))
-            and value not in enums
-        ):
-            raise ValueError("Value '{}' is not allowed for this attribute '{}'".format(value, proper))
+        try:
+            validate(value, BOOKING_SCHEMA['properties'][proper])
+        except ValidationError as exc:
+            raise ValueError(f'Invalid value for {proper}') from exc

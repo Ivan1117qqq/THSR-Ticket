@@ -4,7 +4,17 @@ import jsonschema
 
 from thsr_ticket.model.web.booking_form.booking_form import BookingForm
 
-book = BookingForm()
+
+@pytest.fixture
+def book(tomorrow):
+    form = BookingForm()
+    form.start_station = 2
+    form.dest_station = 9
+    form.seat_prefer = 'radio17'
+    form.search_by = 'radio19'
+    form.outbound_date = tomorrow
+    form.outbound_time = '530P'
+    return form
 
 
 @pytest.fixture
@@ -14,7 +24,7 @@ def tomorrow():
 
 
 @pytest.mark.parametrize("val", [0, 5.5, 13])
-def test_set_station(val):
+def test_set_station(val, book):
     with pytest.raises(ValueError):
         book.start_station = val
     book.start_station = 2
@@ -27,33 +37,33 @@ def test_set_station(val):
 
 
 @pytest.mark.parametrize("val", [0.5, 2])
-def test_class_type(val):
+def test_class_type(val, book):
     with pytest.raises(ValueError):
         book.class_type = val
     book.class_type = 0
     assert book.class_type == 0
 
 
-@pytest.mark.parametrize("val", ["radio16", "ohoh"])
-def test_seat_prefer(val):
+@pytest.mark.parametrize("val", [None, 1])
+def test_seat_prefer(val, book):
     with pytest.raises(ValueError):
         book.seat_prefer = val
     book.seat_prefer = "radio17"
     assert book.seat_prefer == "radio17"
 
 
-@pytest.mark.parametrize("val", ["2, 0.5"])
-def test_search_by(val):
+@pytest.mark.parametrize("val", [2, 0.5, 'invalid'])
+def test_search_by(val, book):
     with pytest.raises(ValueError):
         book.search_by = val
-    book.search_by = 0
-    assert book.search_by == 0
+    book.search_by = 'radio19'
+    assert book.search_by == 'radio19'
 
 
 @pytest.mark.parametrize("val", [
     "1990/01/15", "20200202", "2020-01-01", "2020/1/3"
 ])
-def test_outbound_date(val, tomorrow):
+def test_outbound_date(val, tomorrow, book):
     with pytest.raises(ValueError):
         book.outbound_date = val
     book.outbound_date = tomorrow
@@ -61,7 +71,7 @@ def test_outbound_date(val, tomorrow):
 
 
 @pytest.mark.parametrize("val", ["123A", "1000B"])
-def test_time(val):
+def test_time(val, book):
     with pytest.raises(ValueError):
         book.outbound_time = val
     with pytest.raises(ValueError):
@@ -72,7 +82,7 @@ def test_time(val):
 
 
 @pytest.mark.parametrize("val", ["2001/07/08", "12345678"])
-def test_inbound_date(val, tomorrow):
+def test_inbound_date(val, tomorrow, book):
     with pytest.raises(ValueError):
         book.inbound_date = val
     book.inbound_date = tomorrow
@@ -80,7 +90,7 @@ def test_inbound_date(val, tomorrow):
 
 
 @pytest.mark.parametrize("val", ["11F", "5.5F", "8B"])
-def test_ticket_num(val):
+def test_ticket_num(val, book):
     with pytest.raises(ValueError):
         book.adult_ticket_num = val
     book.adult_ticket_num = "1F"
@@ -107,7 +117,7 @@ def test_ticket_num(val):
     assert book.college_ticket_num == "0P"
 
 
-def test_get_params(tomorrow):
+def test_get_params(tomorrow, book):
     captcha = "2A1B"
     expected = {
         "BookingS1Form:hf:0": "",
@@ -115,10 +125,11 @@ def test_get_params(tomorrow):
         "selectDestinationStation": 9,
         "trainCon:trainRadioGroup": 0,
         "seatCon:seatRadioGroup": "radio17",
-        "bookingMethod": 0,
+        "bookingMethod": 'radio19',
+        "tripCon:typesoftrip": 0,
         "toTimeInputField": tomorrow,
         "toTimeTable": "530P",
-        "toTrainIDInputField": 0,
+        "toTrainIDInputField": '',
         "backTimeInputField": tomorrow,
         "backTimeTable": "",
         "backTrainIDInputField": "",

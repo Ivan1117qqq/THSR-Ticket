@@ -22,9 +22,8 @@ class ParamDB:
         if db_path is None:
             db_path = os.path.join(MODULE_PATH, ".db", "history.json")
         self.db_path = db_path
-        db_dir = db_path[:db_path.rfind("/")]
-        if not os.path.exists(db_dir):
-            os.makedirs(db_dir)
+        db_dir = os.path.dirname(os.path.abspath(db_path))
+        os.makedirs(db_dir, exist_ok=True)
 
     def save(self, book_model: BookingModel, ticket: ConfirmTicketModel) -> None:
         data = Record(

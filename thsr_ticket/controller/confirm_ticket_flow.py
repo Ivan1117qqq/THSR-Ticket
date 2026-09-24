@@ -15,7 +15,7 @@ class ConfirmTicketFlow:
         self.train_resp = train_resp
         self.record = record
 
-    def run(self) -> Tuple[Response]:
+    def run(self) -> Tuple[Response, ConfirmTicketModel]:
         page = BeautifulSoup(self.train_resp.content, features='html.parser')
         ticket_model = ConfirmTicketModel(
             personal_id=self.set_personal_id(),
@@ -32,15 +32,21 @@ class ConfirmTicketFlow:
         if self.record and (personal_id := self.record.personal_id):
             return personal_id
 
-        return input(f'輸入身分證字號：\n')
+        while True:
+            try:
+                return ConfirmTicketModel.check_personal_id(input('輸入身分證字號：\n'))
+            except ValueError as exc:
+                print(str(exc))
 
     def set_phone_num(self) -> str:
         if self.record and (phone_num := self.record.phone):
             return phone_num
 
-        if phone_num := input('輸入手機號碼（預設：""）：\n'):
-            return phone_num
-        return ''
+        while True:
+            try:
+                return ConfirmTicketModel.check_phone(input('輸入手機號碼（可留空）：\n'))
+            except ValueError as exc:
+                print(str(exc))
 
 
 def _parse_member_radio(page: BeautifulSoup) -> str:
@@ -50,5 +56,7 @@ def _parse_member_radio(page: BeautifulSoup) -> str:
             'name': 'TicketMemberSystemInputPanel:TakerMemberSystemDataView:memberSystemRadioGroup'
         },
     )
-    tag = next((cand for cand in candidates if 'checked' in cand.attrs))
+    tag = next((cand for cand in candidates if 'checked' in cand.attrs), None)
+    if tag is None:
+        raise ValueError('找不到會員選項，網站頁面可能已變更。')
     return tag.attrs['value']

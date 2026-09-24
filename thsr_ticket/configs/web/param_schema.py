@@ -5,10 +5,11 @@ from typing import Mapping, Any
 from pydantic import (
     BaseModel as PydanticBaseModel,
     Field,
-    validator
+    validator,
+    root_validator,
 )
 
-from thsr_ticket.configs.common import AVAILABLE_TIME_TABLE
+from thsr_ticket.configs.common import AVAILABLE_TIME_TABLE, MAX_TICKET_NUM
 
 
 BOOKING_SCHEMA: Mapping[str, Any] = {
@@ -156,7 +157,7 @@ class BookingModel(BaseModel):
 
     @validator('search_by')
     def check_search_by(cls, value):
-        if not re.match(r'radio\d+', value):
+        if not re.fullmatch(r'radio\d+', value):
             raise ValueError(f'Invalid search_by format: {value}')
         return value
 
@@ -167,6 +168,7 @@ class BookingModel(BaseModel):
         return value
 
     @validator('outbound_date', 'inbound_date')
+    @classmethod
     def check_date(cls, value):
         if value is None:
             return date.today().strftime('%Y/%m/%d')
@@ -190,6 +192,29 @@ class BookingModel(BaseModel):
     def check_time(cls, value):
         if value not in AVAILABLE_TIME_TABLE:
             raise ValueError(f'Unknown time string: {value}')
+        return value
+
+    @validator('class_type')
+    def check_class_type(cls, value):
+        if value not in (0, 1):
+            raise ValueError('車廂種類必須為標準或商務。')
+        return value
+
+    @root_validator(skip_on_failure=True)
+    def check_trip(cls, values):
+        if values.get('start_station') == values.get('dest_station'):
+            raise ValueError('起訖站不能相同。')
+        names = ('adult', 'child', 'disabled', 'elder', 'college')
+        total = sum(int(values[f'{name}_ticket_num'][:-1]) for name in names)
+        if not 1 <= total <= MAX_TICKET_NUM:
+            raise ValueError(f'總票數必須介於 1 與 {MAX_TICKET_NUM}。')
+        return values
+
+    @validator('adult_ticket_num', 'child_ticket_num', 'disabled_ticket_num',
+               'elder_ticket_num', 'college_ticket_num')
+    def check_ticket_count(cls, value):
+        if not re.fullmatch(r'(?:[0-9]|10)[FHWEP]', value):
+            raise ValueError('票數格式錯誤或超出範圍。')
         return value
 
     @validator('adult_ticket_num')
@@ -253,3 +278,19 @@ class ConfirmTicketModel(BaseModel):
     go_back_m: str = Field('', alias='isGoBackM')
     back_home: str = Field('', alias='backHome')
     tgo_error: int = Field(1, alias='TgoError')
+
+    @validator('personal_id')
+    @classmethod
+    def check_personal_id(cls, value):
+        value = value.strip().upper()
+        if not re.fullmatch(r'[A-Z][12][0-9]{8}', value):
+            raise ValueError('請輸入格式正確的身分證字號。')
+        return value
+
+    @validator('phone_num')
+    @classmethod
+    def check_phone(cls, value):
+        value = value.strip()
+        if value and not re.fullmatch(r'09[0-9]{8}', value):
+            raise ValueError('手機號碼必須是 09 開頭的 10 位數字。')
+        return value

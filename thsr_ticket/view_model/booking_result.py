@@ -1,4 +1,4 @@
-from typing import List, Mapping, Any
+from typing import List
 from collections import namedtuple
 
 from bs4 import BeautifulSoup
@@ -18,9 +18,15 @@ class BookingResult(AbstractViewModel):
         self.ticket: Ticket = None
 
     def parse(self, html: bytes) -> List[Ticket]:
+        try:
+            return self._parse_result(html)
+        except (AttributeError, IndexError, KeyError, TypeError) as exc:
+            raise ValueError('無法解析訂票結果，網站頁面可能已變更。') from exc
+
+    def _parse_result(self, html: bytes) -> List[Ticket]:
         page = self._parser(html)
         booking_id = page.find(**BOOKING_RESULT["ticket_id"]).find("span").text
-        deadline = page.find(**BOOKING_RESULT["payment_deadline"]).find_next(text='（付款期限：').find_next().text
+        deadline = page.find(**BOOKING_RESULT["payment_deadline"]).find_next(string='（付款期限：').find_next().text
         total_price = page.find(**BOOKING_RESULT["total_price"]).text
         train_id = page.find(**BOOKING_RESULT["train_id"]).text
         depart_time = page.find(**BOOKING_RESULT["depart_time"]).text
