@@ -34,6 +34,9 @@ notepad booking.local.json
 
 將範例的 2099 年日期與身分證提示文字改成實際資料，並設定：
 
+不清楚欄位時，先看 [逐欄填寫指南與車站代碼](docs/automation.md#設定欄位)。
+`start_at` 是開始查票的時間，`outbound_date` 才是搭車日期；已建立 `booking.local.json` 就直接編輯，避免重新複製範本覆蓋資料。
+
 - `start_at`：開始查詢時間，未指定時區視為台灣時間；已過時間則立即開始。
 - `interval_seconds`：每輪查詢完成後的等待秒數，例如 `1` 或 `0.5`，請求不重疊。
 - `max_attempts`：最多查詢次數，達上限即停止。
