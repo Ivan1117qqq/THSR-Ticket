@@ -1,0 +1,3 @@
+# Optional browser and local OCR support, verified with Windows CPython 3.13.
+playwright==1.63.0
+ddddocr==1.6.1

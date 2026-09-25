@@ -14,6 +14,7 @@ from thsr_ticket.configs.web.param_schema import BookingModel
 from thsr_ticket.configs.web.parse_html_element import BOOKING_PAGE
 from thsr_ticket.configs.web.enums import StationMapping, TicketType
 from thsr_ticket.view.input_utils import read_int
+from thsr_ticket.captcha import CaptchaReader
 from thsr_ticket.configs.common import (
     AVAILABLE_TIME_TABLE,
     MAX_TICKET_NUM,
@@ -21,9 +22,11 @@ from thsr_ticket.configs.common import (
 
 
 class FirstPageFlow:
-    def __init__(self, client: HTTPRequest, record: Record = None) -> None:
+    def __init__(self, client: HTTPRequest, record: Record = None, captcha_reader: CaptchaReader = None) -> None:
         self.client = client
         self.record = record
+        self.captcha_reader = captcha_reader
+        self.used_ocr = False
 
     def run(self) -> Tuple[Response, BookingModel]:
         # First page. Booking options
@@ -48,7 +51,7 @@ class FirstPageFlow:
                     seat_prefer=_select_seat_prefer(page),
                     types_of_trip=_parse_types_of_trip_value(page),
                     search_by=_parse_search_by(page),
-                    security_code=_input_security_code(img_resp),
+                    security_code=self.read_security_code(img_resp),
                 )
                 break
             except ValidationError as exc:
@@ -58,6 +61,17 @@ class FirstPageFlow:
         dict_params = json.loads(json_params)
         resp = self.client.submit_booking_form(dict_params)
         return resp, book_model
+
+    def read_security_code(self, image: bytes) -> str:
+        self.used_ocr = False
+        if self.captcha_reader is not None:
+            guess = self.captcha_reader.recognize(image)
+            if guess is not None:
+                self.used_ocr = True
+                print(f'已自動辨識驗證碼：{guess.text}')
+                return guess.text
+            print('自動辨識不可用或結果不確定，請手動輸入。')
+        return _input_security_code(image)
 
     def select_station(self, travel_type: str, default_value: int = StationMapping.Taipei.value) -> int:
         if (

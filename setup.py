@@ -11,5 +11,6 @@ setup(
     author_email='miyashita2010@tuta.io',
     packages=find_packages(),
     install_requires=requirements,
+    extras_require={'automation': ['playwright==1.63.0', 'ddddocr==1.6.1']},
     entry_points={'console_scripts': ['thsr-ticket = thsr_ticket.main:main']}
 )

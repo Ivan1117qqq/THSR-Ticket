@@ -67,6 +67,38 @@ python -m venv .venv
 此連線測試只讀取頁面，不送出訂票。離線測試採用人工建立的 HTML 範例，
 通過不代表已確認現行網站可以完成訂票。
 
+### Chrome 模式與自動驗證碼
+
+若 HTTP 連線逾時，可以改用標準啟動方式的獨立 Chrome 視窗。已安裝的 Chrome 可直接使用，
+不需要匯入個人瀏覽器資料。可選擇啟用本機 OCR；模型結果不確定或套件不可用時，改為手動輸入。
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-automation-lock.txt
+
+# 只讀取首頁與驗證碼、測試 OCR，不送出查詢或訂票
+.\.venv\Scripts\thsr-ticket.exe --browser chrome --auto-captcha --check-connection
+
+# 查詢車次後停止，不選車或訂票
+.\.venv\Scripts\thsr-ticket.exe --browser chrome --auto-captcha --query-only
+
+# 開始互動訂票流程
+.\.venv\Scripts\thsr-ticket.exe --browser chrome --auto-captcha
+
+# 使用離線攔截頁面測試瀏覽器操作，需要已安裝 Chrome
+.\.venv\Scripts\python.exe -m pytest --browser-tests -q
+```
+
+本次協作環境使用 `.venv/windows/Scripts/`，請將上面指令的 `.venv/Scripts/` 換成該路徑。
+也可用 `--browser msedge` 選擇 Edge；`--headless` 是背景模式，但本次實站測試背景模式連線失敗，
+因此先使用預設的一般視窗模式。瀏覽器模式會處理網站的 Cookie 提示；
+工作階段結束後關閉獨立瀏覽器並清理專用暫存設定檔，不使用個人 Chrome 設定檔。
+
+OCR 僅適用目前的四碼英數字圖片，不能保證辨識正確，也不處理其他互動式網站檢測。
+若使用 OCR 的查詢遭網站拒絕，該次執行後續改成手動輸入，不會自動反覆猜測。
+**已成功完成一次實站「取得驗證碼 → OCR → 查詢 → 解析 10 筆車次」，未選車或送出訂票。**
+也曾遇到 OCR 結果被網站拒絕；這不代表每張驗證碼都能自動辨識成功。
+詳見 [瀏覽器與 OCR 驗證紀錄](docs/browser-ocr.md)。
+
 身分證與手機預設不保存；訂票完成後可選擇保存至 `thsr_ticket/.db/history.json`。
 此檔案是明文 JSON，歷史紀錄列表只顯示證號與手機末三碼。
 

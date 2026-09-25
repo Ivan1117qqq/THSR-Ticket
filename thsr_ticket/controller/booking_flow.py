@@ -11,26 +11,43 @@ from thsr_ticket.view.common import history_info
 from thsr_ticket.model.db import ParamDB, Record
 from thsr_ticket.remote.http_request import HTTPRequest
 from thsr_ticket.view.input_utils import read_int
+from thsr_ticket.captcha import CaptchaReader
+from thsr_ticket.view_model.avail_trains import AvailTrains
 
 
 class BookingFlow:
-    def __init__(self) -> None:
-        self.client = HTTPRequest()
+    def __init__(self, client: HTTPRequest = None, captcha_reader: CaptchaReader = None) -> None:
+        self.client = client if client is not None else HTTPRequest()
+        self.captcha_reader = captcha_reader
         self.db = ParamDB()
         self.record = Record()
 
         self.error_feedback = ErrorFeedback()
         self.show_error_msg = ShowErrorMsg()
 
-    def run(self) -> Response:
+    def run(self, query_only: bool = False) -> Response:
         self.show_history()
 
         while True:
             # Start a fresh query after a captcha error or a user-requested search.
-            book_resp, book_model = FirstPageFlow(client=self.client, record=self.record).run()
+            first_page = FirstPageFlow(client=self.client, record=self.record, captcha_reader=self.captcha_reader)
+            book_resp, book_model = first_page.run()
             if self.show_error(book_resp.content):
+                if first_page.used_ocr:
+                    # Do not repeatedly guess if the server rejects the query.
+                    self.captcha_reader = None
+                    print('本次查詢未成功，後續改用手動驗證碼。')
                 if read_int('重新查詢並取得新驗證碼？1 是 / 0 結束（預設 0）：', 0, 1, 0):
                     continue
+                return book_resp
+
+            if query_only:
+                trains = AvailTrains().parse(book_resp.content)
+                if not trains:
+                    print('本次查詢沒有可選車次。')
+                for train in trains:
+                    print(f'{train.id:04d}  {train.depart}–{train.arrive}  {train.discount_str}')
+                print('只查詢模式已結束；未選車、未輸入個資、未送出訂票。')
                 return book_resp
 
             try:

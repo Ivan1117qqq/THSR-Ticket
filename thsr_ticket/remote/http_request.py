@@ -32,6 +32,9 @@ class HTTPRequest:
     def request_booking_page(self) -> Response:
         return self._request('GET', HTTPConfig.BOOKING_PAGE_URL)
 
+    def close(self) -> None:
+        self.sess.close()
+
     def request_security_code_img(self, book_page: bytes) -> Response:
         img_url = parse_security_img_url(book_page)
         return self._request('GET', img_url)
@@ -50,6 +53,9 @@ class HTTPRequest:
             raise ValueError(f'找不到訂票表單 {form_id}，請重新查詢。')
         data = {key: value for key, value in params.items() if value is not None}
         data.update(self.hidden_fields.get(form_id, {}))
+        for name in ('toTimeInputField', 'backTimeInputField'):
+            if params.get(name) is not None:
+                data[name] = params[name]
         return self._request('POST', self.form_actions[form_id], data=data)
 
     def _request(self, method: str, url: str, **kwargs: Any) -> Response:
@@ -59,17 +65,20 @@ class HTTPRequest:
         )
         response.raise_for_status()
         if 'image/' not in response.headers.get('Content-Type', ''):
-            page = BeautifulSoup(response.content, features='html.parser')
-            self.form_actions = {}
-            self.hidden_fields = {}
-            for form in page.find_all('form', id=True, action=True):
-                target = _site_url(response.url, str(form['action']))
-                self.form_actions[form['id']] = target
-                self.hidden_fields[form['id']] = {
-                    field['name']: field.get('value', '')
-                    for field in form.find_all('input', type='hidden', attrs={'name': True})
-                }
+            self._remember_forms(response)
         return response
+
+    def _remember_forms(self, response: Response) -> None:
+        page = BeautifulSoup(response.content, features='html.parser')
+        self.form_actions = {}
+        self.hidden_fields = {}
+        for form in page.find_all('form', id=True, action=True):
+            target = _site_url(response.url, str(form['action']))
+            self.form_actions[form['id']] = target
+            self.hidden_fields[form['id']] = {
+                field['name']: field.get('value', '')
+                for field in form.find_all('input', type='hidden', attrs={'name': True})
+            }
 
 
 def _site_url(base: str, target: str) -> str:
