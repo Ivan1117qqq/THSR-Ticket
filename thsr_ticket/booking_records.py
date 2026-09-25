@@ -1,5 +1,7 @@
 """Inspect and archive local records without reading personal config or connecting."""
 import json
+import builtins
+from functools import partial
 from pathlib import Path
 from uuid import uuid4
 
@@ -26,7 +28,8 @@ def booking_codes(value):
     return [code.strip() for code in codes]
 
 
-def show_bookings(config_path):
+def show_bookings(config_path, output=None):
+    print = partial(builtins.print, file=output)
     state, runs = record_paths(config_path)
     print('以下為本機紀錄，不會同步官網付款或取消狀態。')
     if state.exists():
@@ -76,7 +79,8 @@ def show_bookings(config_path):
         print('尚無完整結果或封存檔；舊版本僅保存代碼時，無法補回完整行程。')
 
 
-def archive_booking(config_path, expected_code):
+def archive_booking(config_path, expected_code, output=None):
+    print = partial(builtins.print, file=output)
     state, runs = record_paths(config_path)
     # A dedicated lock serializes archive commands. Booking cannot pass the existing state marker.
     lock = state.with_suffix('.archive.lock')
