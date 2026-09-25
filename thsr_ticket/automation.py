@@ -6,7 +6,7 @@ import re
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import List
+from typing import List, Literal
 
 from bs4 import BeautifulSoup
 from pydantic import BaseModel, Field, root_validator, validator
@@ -47,6 +47,7 @@ class AutomationConfig(BaseModel):
     start_at: datetime
     interval_seconds: float = 1.0
     max_attempts: int = Field(60, ge=1, le=10000)
+    ocr_model: Literal['standard', 'beta'] = 'standard'
     start_station: int
     dest_station: int
     outbound_date: str
@@ -143,6 +144,15 @@ def no_seats_response(response):
     return bool(errors) and all(any(message in error.msg for message in known_messages) for error in errors)
 
 
+def captcha_rejected(response):
+    """Only retry the explicit query rejection reported by the website."""
+    response.raise_for_status()
+    errors = ErrorFeedback().parse(response.content)
+    messages = {'檢測碼輸入錯誤，請確認後重新輸入，謝謝！',
+                '驗證碼輸入錯誤，請確認後重新輸入，謝謝！'}
+    return bool(errors) and all(error.msg.strip() in messages for error in errors)
+
+
 class AutomationRunner:
     def __init__(self, config, client, reader, state_path, sleep=time.sleep):
         self.config, self.client, self.reader = config, client, reader
@@ -162,10 +172,16 @@ class AutomationRunner:
             image.raise_for_status()
             guess = self.reader.recognize(image.content)
             if guess is None:
-                raise RuntimeError('驗證碼無可靠辨識結果；自動模式已停止，未送出訂位。')
+                if self.reader.unavailable:
+                    raise RuntimeError('OCR 模型無法運作，已停止；請檢查套件與模型。')
+                self.retry(attempt, '驗證碼無可靠辨識結果，未送出查詢')
+                continue
             model = self.config.build_booking(self.config.dict(), _parse_search_by(page),
                                               _parse_seat_prefer_value(page), guess.text)
             reply = self.client.submit_booking_form(json.loads(model.json(by_alias=True)))
+            if captcha_rejected(reply):
+                self.retry(attempt, '網站回覆驗證碼錯誤')
+                continue
             selected = None
             if not no_seats_response(reply):
                 check_errors(reply)
@@ -181,11 +197,16 @@ class AutomationRunner:
                     return True
                 self.book(selected)
                 return True
-            if attempt < self.config.max_attempts:
-                print(f'沒有符合條件的車次，{self.config.interval_seconds:g} 秒後重查。')
-                self.sleep(self.config.interval_seconds)
+            self.retry(attempt, '沒有符合條件的車次')
         print('已達查詢次數上限，未送出訂位。')
         return False
+
+    def retry(self, attempt, reason):
+        if attempt < self.config.max_attempts:
+            print(f'{reason}，{self.config.interval_seconds:g} 秒後重新取得首頁與驗證碼。')
+            self.sleep(self.config.interval_seconds)
+        else:
+            print(f'{reason}，不再重試。')
 
     def book(self, selected):
         train = ConfirmTrainModel(selected_train=selected.form_value)

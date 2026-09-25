@@ -50,7 +50,7 @@ def main() -> int:
                                     interactive=config is None)
         else:
             client = HTTPRequest(max_retries=0, timeout=15)
-        reader = CaptchaReader() if args.auto_captcha or config else None
+        reader = CaptchaReader(model=config.ocr_model if config else 'standard') if args.auto_captcha or config else None
         if config:
             if not reader.prepare():
                 raise RuntimeError('本機 OCR 無法載入，請確認已安裝 requirements-automation-lock.txt。')

@@ -28,6 +28,7 @@ def runner(config, tmp_path, monkeypatch):
     client.submit_train.return_value = response(html('confirmation'))
     client.submit_ticket.return_value = response(html('result'))
     reader = Mock()
+    reader.unavailable = False
     reader.recognize.return_value = CaptchaGuess('ABCD', 0.9)
     return AutomationRunner(config, client, reader, tmp_path / 'booking.state.json', sleep=Mock())
 
@@ -124,6 +125,7 @@ def test_attempt_limit_and_query_only(runner):
 def test_failures_stop_without_booking(runner, failure):
     if failure == 'ocr':
         runner.reader.recognize.return_value = None
+        runner.reader.unavailable = True
     elif failure == 'rejected':
         runner.client.submit_booking_form.return_value = response(
             b'<span class="feedbackPanelERROR">invalid captcha</span>')
@@ -190,3 +192,83 @@ def test_ocr_preload_once_and_missing_engine_stops():
     assert not failed.prepare()
     assert failed.recognize(b'image') is None
     assert factory.call_count == 2
+
+
+CAPTCHA_ERROR = '檢測碼輸入錯誤，請確認後重新輸入，謝謝！'
+
+
+def captcha_error(extra=''):
+    return response((f'<span class="feedbackPanelERROR">{CAPTCHA_ERROR}</span>' + extra).encode('utf-8'))
+
+
+def test_captcha_rejection_gets_fresh_image_then_books_once(runner):
+    runner.client.submit_booking_form.side_effect = [captcha_error(), response(html('trains'))]
+    runner.client.request_security_code_img.side_effect = [response(b'first'), response(b'second')]
+    runner.reader.recognize.side_effect = [CaptchaGuess('ABCD', 0.9), CaptchaGuess('EFGH', 0.9)]
+    assert runner.run()
+    assert runner.client.request_booking_page.call_count == 2
+    assert [call.args[0] for call in runner.reader.recognize.call_args_list] == [b'first', b'second']
+    codes = [call.args[0]['homeCaptcha:securityCode'] for call in runner.client.submit_booking_form.call_args_list]
+    assert codes == ['ABCD', 'EFGH']
+    runner.sleep.assert_called_once_with(0.5)
+    runner.client.submit_train.assert_called_once()
+    runner.client.submit_ticket.assert_called_once()
+
+
+def test_captcha_failures_share_total_budget_with_no_trains_and_low_score(runner):
+    runner.config.max_attempts = 4
+    runner.reader.recognize.side_effect = [None] + [CaptchaGuess('ABCD', 0.9)] * 3
+    runner.client.submit_booking_form.side_effect = [
+        captcha_error(), response(b'<form id="BookingS2Form"></form>'), captcha_error()]
+    assert not runner.run()
+    assert runner.client.request_booking_page.call_count == 4
+    assert runner.client.submit_booking_form.call_count == 3
+    assert runner.sleep.call_count == 3
+    runner.client.submit_train.assert_not_called()
+    assert not runner.state_path.exists()
+
+
+def test_more_than_three_captcha_retries_are_allowed(runner):
+    runner.config.max_attempts = 5
+    runner.client.submit_booking_form.side_effect = [captcha_error()] * 4 + [response(html('trains'))]
+    assert runner.run(query_only=True)
+    assert runner.client.submit_booking_form.call_count == 5
+    runner.client.submit_ticket.assert_not_called()
+
+
+@pytest.mark.parametrize('extra,status', [
+    ('<span class="feedbackPanelERROR">存取受限</span>', 200),
+    ('', 429), ('', 403),
+])
+def test_captcha_message_does_not_hide_other_errors(runner, extra, status):
+    from requests import HTTPError
+    reply = captcha_error(extra)
+    reply.status_code = status
+    runner.client.submit_booking_form.return_value = reply
+    with pytest.raises((RuntimeError, HTTPError)):
+        runner.run()
+    runner.sleep.assert_not_called()
+    runner.client.submit_ticket.assert_not_called()
+
+
+def test_captcha_word_in_unknown_message_is_not_retried(runner):
+    runner.client.submit_booking_form.return_value = response(
+        f'<span class="feedbackPanelERROR">{CAPTCHA_ERROR} 存取受限</span>'.encode('utf-8'))
+    with pytest.raises(RuntimeError):
+        runner.run()
+    runner.sleep.assert_not_called()
+
+
+def test_captcha_error_on_final_submission_is_not_retried(runner):
+    runner.client.submit_ticket.return_value = captcha_error()
+    with pytest.raises(RuntimeError, match='結果尚未確認'):
+        runner.run()
+    runner.client.submit_ticket.assert_called_once()
+    runner.sleep.assert_not_called()
+
+
+def test_ocr_model_config_backward_compatible(config):
+    assert config.ocr_model == 'standard'
+    assert AutomationConfig(**{**config.dict(), 'ocr_model': 'beta'}).ocr_model == 'beta'
+    with pytest.raises(ValidationError):
+        AutomationConfig(**{**config.dict(), 'ocr_model': 'unknown'})

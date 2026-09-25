@@ -46,17 +46,20 @@ def decode_prediction(result: dict) -> Optional[CaptchaGuess]:
     return CaptchaGuess(text.upper(), min(scores))
 
 
-def _load_engine() -> Any:
+def _load_engine(model: str = 'standard') -> Any:
     from ddddocr import DdddOcr  # Optional dependency; manual mode never imports it.
-    return DdddOcr(show_ad=False)
+    return DdddOcr(show_ad=False, beta=model == 'beta')
 
 
 class CaptchaReader:
-    def __init__(self, min_score: float = 0.5, engine_factory: Callable = _load_engine) -> None:
+    def __init__(self, min_score: float = 0.5, engine_factory: Optional[Callable] = None,
+                 model: str = 'standard') -> None:
         if not 0 <= min_score <= 1:
             raise ValueError('OCR 分數門檻必須介於 0 與 1。')
+        if model not in ('standard', 'beta'):
+            raise ValueError('OCR 模型必須為 standard 或 beta。')
         self.min_score = min_score
-        self.engine_factory = engine_factory
+        self.engine_factory = engine_factory if engine_factory is not None else lambda: _load_engine(model)
         self.engine = None
         self.unavailable = False
 
