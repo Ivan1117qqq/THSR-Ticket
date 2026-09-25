@@ -124,3 +124,13 @@ def test_missing_required_field_does_not_submit(browser_client):
     with pytest.raises(ValueError):
         browser_client.submit_booking_form(booking_params())
     assert not any(call.method == 'POST' for call in calls)
+
+
+def test_unattended_missing_form_never_prompts(browser_client, monkeypatch):
+    def unexpected_input(*args):
+        pytest.fail('自動模式不得等待輸入')
+    monkeypatch.setattr('builtins.input', unexpected_input)
+    browser_client.interactive = False
+    browser_client.page.route('**/*', lambda route: route.fulfill(body='<html>Unavailable</html>'))
+    with pytest.raises(ValueError, match='未取得訂票表單'):
+        browser_client.request_booking_page()

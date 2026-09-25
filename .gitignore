@@ -11,3 +11,5 @@ dist/
 *.png
 test.py
 *.code-workspace
+booking.local.json
+*.state.json

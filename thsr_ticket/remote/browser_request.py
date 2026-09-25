@@ -10,7 +10,8 @@ from thsr_ticket.remote.http_request import HTTPRequest, _site_url
 
 
 class BrowserRequest(HTTPRequest):
-    def __init__(self, channel: str = 'chrome', headless: bool = False, timeout: float = 30) -> None:
+    def __init__(self, channel: str = 'chrome', headless: bool = False, timeout: float = 30,
+                 interactive: bool = True) -> None:
         try:
             from playwright.sync_api import sync_playwright, Error
         except ImportError as exc:
@@ -20,6 +21,7 @@ class BrowserRequest(HTTPRequest):
         self.driver = None
         self.native = None
         self.headless = headless
+        self.interactive = interactive
         self.browser_error = Error
         try:
             self.driver = sync_playwright().start()
@@ -69,7 +71,7 @@ class BrowserRequest(HTTPRequest):
             if cookie_notice.is_visible():
                 cookie_notice.click()
             result = self._snapshot(reply.status if reply else 200)
-            if 'BookingS1Form' not in self.form_actions and not self.headless:
+            if 'BookingS1Form' not in self.form_actions and not self.headless and self.interactive:
                 input('瀏覽器未顯示訂票表單；請確認頁面或手動完成網站檢測後按 Enter（Ctrl+C 結束）：')
                 result = self._snapshot()
             if 'BookingS1Form' not in self.form_actions:

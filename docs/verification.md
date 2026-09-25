@@ -5,6 +5,10 @@
 後續已加入瀏覽器連線與本機 OCR；更新結果見 [瀏覽器與 OCR 驗證紀錄](browser-ocr.md)。
 下方 58 項測試與首頁逾時為前一階段紀錄。
 
+2026-09-25 新增設定檔與定時自動訂位流程，操作與限制見 [自動訂位說明](automation.md)。
+最新驗證：`pytest -q --browser-tests -p no:cacheprovider` 為 **119 通過、1 項實站測試跳過**，
+Flake8（原有設定、`-j 1`）通過。自動流程以模擬回應驗證，沒有建立真實訂位。
+
 ## 環境與重現方式
 
 - Windows；CPython 3.13.5（使用本機 Miniconda 的 Python 建立獨立 venv）。

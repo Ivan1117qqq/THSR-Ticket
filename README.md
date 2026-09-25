@@ -1,137 +1,120 @@
 # 高鐵訂票小幫手
 
-**!!--純研究用途，請勿用於不當用途--!!**
+以 Python 命令列操作高鐵單程訂票，提供互動填寫與預先設定的定時自動訂位兩種模式。
+支援本機驗證碼 OCR；自動模式可在指定時間開始查票，依設定間隔重查，找到符合條件的車次後送出訂位，取得訂位代碼即停止，不付款。
 
-此程式提供另一種輕便的方式訂購高鐵車票，操作介面為命令列介面。相較於使用網頁訂購，本程式因為省卻了渲染網頁介面的時間，只保留最核心的訂購功能，因此能省下大量等待的時間。
+目前已完成一次實站 OCR 車次查詢並解析 10 筆車次；**選車與最終訂位僅通過離線模擬，尚未驗證實站訂位成功**。
+查詢速度取決於網頁載入、辨識及網站回應，不保證搶票成功。
 
-**(2025/05/12 update)** 另有 Rust 新版本提供執行檔、早鳥票預訂、會員購票等新功能，可以參考 [thsr-ticket-rs](https://github.com/BreezeWhite/thsr-ticket-rs)
+## 安裝
 
-## 執行
-
-本程式由python語言所寫成，因此必須先安裝python才能夠使用。官方下載網址[點這裡](https://www.python.org/downloads/release/python-381/)
-
-### 方法一 （快速）
-在已經有安裝好python的環境下，執行以下指令
-``` bash
-pip install git+https://github.com/BreezeWhite/THSR-Ticket.git
-
-# 執行
-thsr-ticket
-```
-
-### 方法二
-首先先將程式碼下載到本機，執行以下指令或是直接按右上方的下載按鈕
-
-```
-git clone https://github.com/BreezeWhite/THSR-Ticket.git
-```
-
-再來進入到資料夾中
-
-```
-cd THSR-Ticket
-```
-
-安裝必要的套件
-
-```
-python -m pip install -r requirements.txt
-```
-
-最後執行程式
-
-```
-python thsr_ticket/main.py
-```
-
-### 本機驗證與測試
-
-2026/09/25 已在 Windows、CPython 3.13.5 驗證安裝與離線流程。
-本次完整結果與尚待確認事項見 [驗證紀錄](docs/verification.md)。
-`requirements-lock.txt` 記錄本次驗證使用的套件版本（Python 3.13 環境）。
+已驗證環境為 Windows、CPython 3.13.5 與已安裝的 Chrome。以下從本專案分支安裝，包含瀏覽器及 OCR 套件：
 
 ```powershell
+git clone https://github.com/Ivan1117qqq/THSR-Ticket.git
+cd THSR-Ticket
 python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements-lock.txt
+.\.venv\Scripts\python.exe -m pip install -r requirements-automation-lock.txt
 .\.venv\Scripts\python.exe -m pip install --no-deps -e .
-.\.venv\Scripts\thsr-ticket.exe --help
-.\.venv\Scripts\python.exe -m pytest -q
+.\.venv\Scripts\python.exe -m thsr_ticket.main --help
 ```
 
-預設測試不連線。若要檢查高鐵首頁、表單及驗證碼是否仍可讀取：
+以下指令統一使用新建環境的 `.venv\Scripts\python.exe`。
+**目前開發工作區已有的環境位於 `.venv\windows\Scripts\python.exe`**；若使用該環境，請替換路徑，不需重建。
+只使用 HTTP 與手動驗證碼時，可改裝 `requirements-lock.txt`；先前實站測試 HTTP 模式曾逾時。
+
+## 定時自動訂位
+
+先建立個人設定檔：
+
+```powershell
+Copy-Item booking.example.json booking.local.json
+notepad booking.local.json
+```
+
+將範例的 2099 年日期與身分證提示文字改成實際資料，並設定：
+
+- `start_at`：開始查詢時間，未指定時區視為台灣時間；已過時間則立即開始。
+- `interval_seconds`：每輪查詢完成後的等待秒數，例如 `1` 或 `0.5`，請求不重疊。
+- `max_attempts`：最多查詢次數，達上限即停止。
+- 起訖站、乘車日期、可接受時段、票種張數與車廂。
+- `train_ids`：可接受車次的優先順序；空陣列表示選擇回傳結果中最早符合時段的車次。
+- `personal_id`、`phone_num`：乘客證號與手機。
+
+先離線驗證設定，再啟動：
+
+```powershell
+# 只驗證設定，不開瀏覽器或連線
+.\.venv\Scripts\python.exe -m thsr_ticket.main --config booking.local.json --validate-config
+
+# 定時查票並自動送出訂位，不付款
+.\.venv\Scripts\python.exe -m thsr_ticket.main --config booking.local.json
+```
+
+自動模式預設使用 Chrome 及本機 OCR，會先載入瀏覽器與模型再等待設定時間；電腦需保持開機且不要睡眠。
+`0.5` 秒是兩輪間的等待時間，不代表每半秒完成一次查詢。
+若要只查票，在啟動指令加上 `--query-only`，找到符合條件的車次後會停止，不選車或訂位。
+
+OCR 無可靠結果、驗證碼遭拒、未知網站錯誤或網路失敗時，自動模式會停止，不等待輸入。
+送出最終訂位前會建立 `booking.local.state.json`；成功時保存訂位代碼，結果不明時保留待確認紀錄。
+再次使用同一設定檔訂位會停止，請先至官網確認狀態，再自行處理紀錄，避免重複訂位。
+
+完整欄位、無票重查條件與復原方式見 [自動訂位說明](docs/automation.md)。
+
+## 互動訂票與連線檢查
+
+不加 `--config` 時，程式會依序詢問行程、選車及乘客資料：
+
+```powershell
+# 只讀取首頁及驗證碼、測試 OCR，不送出車次查詢或訂位
+.\.venv\Scripts\python.exe -m thsr_ticket.main --browser chrome --auto-captcha --check-connection
+
+# 手動填寫行程，查詢車次後停止
+.\.venv\Scripts\python.exe -m thsr_ticket.main --browser chrome --auto-captcha --query-only
+
+# 完整互動訂票流程
+.\.venv\Scripts\python.exe -m thsr_ticket.main --browser chrome --auto-captcha
+```
+
+互動模式不加 `--auto-captcha` 即手動輸入驗證碼；OCR 無可靠結果時改為手動輸入，網站拒絕 OCR 查詢後停用本次自動辨識。
+可用 `--browser msedge` 選擇 Edge。`--headless` 提供背景模式，但先前實站連線失敗，尚未確認可用。
+瀏覽器使用獨立暫存設定檔，結束時關閉並清理，不載入個人的 Chrome 資料。
+
+## 功能範圍與本機資料
+
+- 支援單程、依時間查詢；成人、孩童、愛心、敬老及大學生票，合計 1–10 張。資格與可售票種由網站判定。
+- 支援標準／商務車廂；互動模式可選座位偏好，自動模式使用網站預設。
+- 自動模式的指定車次是篩選查詢結果，不是網站的直接車次查詢，也不會自動翻頁搜尋整天班次。
+- 尚未提供來回票、只篩早鳥、會員、護照、市話、電子郵件或付款功能；OCR 不處理其他互動式網站檢測。
+- 互動模式可在成功後選擇保存部分資料至 `thsr_ticket/.db/history.json`，預設不保存；歷史列表遮蔽證號與手機，只保留末三碼。
+- 自動模式的 `booking.local.json` 會保存你填寫的個資。設定檔與歷史資料皆為明文，並非加密。
+  `booking.local.json`、`*.state.json` 與 `.db/` 已由 Git 忽略；自訂個資檔名也需加入忽略清單。
+
+## 測試與驗證
+
+```powershell
+# 離線測試
+.\.venv\Scripts\python.exe -m pytest -q -p no:cacheprovider
+
+# 加入本機 Chrome 操作測試：攔截網站請求，不建立真實訂位
+.\.venv\Scripts\python.exe -m pytest -q --browser-tests -p no:cacheprovider
+
+# 程式風格檢查
+.\.venv\Scripts\python.exe -m flake8 -j1 --config .config/flake thsr_ticket
+```
+
+2026-09-25 驗證結果：**119 項測試通過、1 項實站 HTTP 測試預設跳過，Flake8 通過**。
+測試涵蓋定時等待、次秒間隔、車次篩選、無票重查、成功停止與訂位結果不明時不重送。
+人工 HTML 與本機模擬不能取代實站驗證；Mypy、Pylint 與 CI 尚有待整理項目。
+
+若需單獨測試 HTTP 首頁讀取，可執行下列指令；只讀取頁面與驗證碼，不送出訂位：
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest thsr_ticket/unittest/test_http_request.py --live -q
 ```
 
-此連線測試只讀取頁面，不送出訂票。離線測試採用人工建立的 HTML 範例，
-通過不代表已確認現行網站可以完成訂票。
+詳細紀錄：[專案驗證](docs/verification.md)、[瀏覽器與 OCR](docs/browser-ocr.md)。
 
-### Chrome 模式與自動驗證碼
+## 專案來源
 
-若 HTTP 連線逾時，可以改用標準啟動方式的獨立 Chrome 視窗。已安裝的 Chrome 可直接使用，
-不需要匯入個人瀏覽器資料。可選擇啟用本機 OCR；模型結果不確定或套件不可用時，改為手動輸入。
-
-```powershell
-.\.venv\Scripts\python.exe -m pip install -r requirements-automation-lock.txt
-
-# 只讀取首頁與驗證碼、測試 OCR，不送出查詢或訂票
-.\.venv\Scripts\thsr-ticket.exe --browser chrome --auto-captcha --check-connection
-
-# 查詢車次後停止，不選車或訂票
-.\.venv\Scripts\thsr-ticket.exe --browser chrome --auto-captcha --query-only
-
-# 開始互動訂票流程
-.\.venv\Scripts\thsr-ticket.exe --browser chrome --auto-captcha
-
-# 使用離線攔截頁面測試瀏覽器操作，需要已安裝 Chrome
-.\.venv\Scripts\python.exe -m pytest --browser-tests -q
-```
-
-本次協作環境使用 `.venv/windows/Scripts/`，請將上面指令的 `.venv/Scripts/` 換成該路徑。
-也可用 `--browser msedge` 選擇 Edge；`--headless` 是背景模式，但本次實站測試背景模式連線失敗，
-因此先使用預設的一般視窗模式。瀏覽器模式會處理網站的 Cookie 提示；
-工作階段結束後關閉獨立瀏覽器並清理專用暫存設定檔，不使用個人 Chrome 設定檔。
-
-OCR 僅適用目前的四碼英數字圖片，不能保證辨識正確，也不處理其他互動式網站檢測。
-若使用 OCR 的查詢遭網站拒絕，該次執行後續改成手動輸入，不會自動反覆猜測。
-**已成功完成一次實站「取得驗證碼 → OCR → 查詢 → 解析 10 筆車次」，未選車或送出訂票。**
-也曾遇到 OCR 結果被網站拒絕；這不代表每張驗證碼都能自動辨識成功。
-詳見 [瀏覽器與 OCR 驗證紀錄](docs/browser-ocr.md)。
-
-身分證與手機預設不保存；訂票完成後可選擇保存至 `thsr_ticket/.db/history.json`。
-此檔案是明文 JSON，歷史紀錄列表只顯示證號與手機末三碼。
-
-
-## 注意事項!!!
-
-本程式依舊有許多尚未完成的部分，僅具備基本訂購的功能，若是僅需要訂購成人票、且無特殊需求者，此程式對您而言是加速訂購流程的方便小工具。不符合以上描述者，目前仍建議使用官方網頁進行訂購。
-
-#### 提供功能
-
-- [x] 選擇啟程、到達站
-- [x] 選擇出發日期、時間
-- [x] 選擇班次
-- [x] 選擇成人、孩童、愛心、敬老與大學生票數（資格與可售票種由網站判定）
-- [x] 輸入驗證碼
-- [x] 輸入身分證字號
-- [x] 輸入手機號碼
-- [x] 保留此次輸入紀錄，下次可快速選擇此次紀錄
-- [x] 選擇車廂種類與座位喜好
-- [x] 查詢錯誤後重新取得驗證碼；選車時輸入 0 重新查詢
-
-#### 未提供功能
-
-以下功能為未提供輸入的選項，但程式具備相關功能，可依照自身需求、對程式進行修改
-
-- [ ] 訂位方式(依時間搜尋車次/直接輸入車次號碼)
-- [ ] 僅顯示早鳥優惠票
-
-#### 未完成功能
-
-- [ ] 同一頁內直接更換認證碼（目前透過重新查詢取得）
-- [ ] 語音播放認證碼
-- [ ] 輸入護照號碼
-- [ ] 輸入市話
-- [ ] 輸入電子郵件
-- [ ] 會員購票
+本專案基於 [BreezeWhite/THSR-Ticket](https://github.com/BreezeWhite/THSR-Ticket)，此分支新增 Windows 驗證、瀏覽器連線、本機 OCR 與定時自動流程。

@@ -60,12 +60,22 @@ class CaptchaReader:
         self.engine = None
         self.unavailable = False
 
-    def recognize(self, image: bytes) -> Optional[CaptchaGuess]:
+    def prepare(self) -> bool:
+        """Load once before a scheduled run; no image or website request required."""
         if self.unavailable:
-            return None
+            return False
         try:
             if self.engine is None:
                 self.engine = self.engine_factory()
+            return True
+        except Exception:
+            self.unavailable = True
+            return False
+
+    def recognize(self, image: bytes) -> Optional[CaptchaGuess]:
+        if not self.prepare():
+            return None
+        try:
             guess = decode_prediction(self.engine.classification(image, probability=True))
             return guess if guess and guess.score >= self.min_score else None
         except Exception:  # Optional native runtime failures must preserve manual entry.

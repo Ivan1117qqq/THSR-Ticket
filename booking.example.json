@@ -1,0 +1,19 @@
+{
+  "start_at": "2099-01-01T00:00:00+08:00",
+  "interval_seconds": 0.5,
+  "max_attempts": 60,
+  "start_station": 2,
+  "dest_station": 12,
+  "outbound_date": "2099-01-15",
+  "earliest_departure": "09:30",
+  "latest_departure": "12:00",
+  "train_ids": [],
+  "adult_tickets": 1,
+  "child_tickets": 0,
+  "disabled_tickets": 0,
+  "elder_tickets": 0,
+  "college_tickets": 0,
+  "class_type": 0,
+  "personal_id": "請填入身分證字號",
+  "phone_num": ""
+}
