@@ -156,6 +156,76 @@ notepad booking.local.json
   防護以同一設定檔路徑為範圍，勿用複製設定檔的方式同時執行相同行程。
 - `Ctrl+C` 可中止等待或執行；若已送出最終訂位，仍需確認官網狀態。
 
+## 結果與執行紀錄
+
+不需新增設定欄位。自動模式開始查詢後，會在設定檔旁建立以下資料：
+
+```text
+booking.local.json
+booking.local.state.json
+booking.local.runs/
+  <每次執行的獨立代碼>/
+    events.jsonl
+    result.json
+```
+
+每次執行建立不同資料夾，舊紀錄不被覆蓋。若使用不同設定檔名稱，資料夾也會跟著改名。
+這項保存功能目前適用 `--config` 自動模式，不包含互動訂票流程。
+
+### 完整訂位結果：result.json
+
+只有成功解析訂位結果後才建立，包含：
+
+| 欄位 | 說明 |
+| --- | --- |
+| `saved_at` | 保存時間，含台灣時區 |
+| `status` / `payment_status` | `booked` / `unpaid`，表示當次已訂位、尚未付款；後續不會自動同步官網付款或取消狀態 |
+| `requested_outbound_date` | 設定檔指定的完整乘車日期 |
+| `tickets` | 網站回傳並成功解析的訂位結果清單 |
+| `tickets[].id` | 訂位代碼 |
+| `tickets[].date` | 網站顯示的乘車日期，保留原文字，不自行推算年份 |
+| `tickets[].start_station` / `dest_station` | 起訖站 |
+| `tickets[].train_id` | 車次 |
+| `tickets[].depart_time` / `arrival_time` | 發車及抵達時間 |
+| `tickets[].seat` / `seat_class` | 車廂座位及車廂種類 |
+| `tickets[].price` / `ticket_num_info` | 金額與票種張數文字 |
+| `tickets[].payment_deadline` | 網站顯示的繳費期限，保留原文字 |
+
+終端會印出完整檔案位置，可直接在編輯器開啟。查詢模式、無票結束或訂位結果不明時，不建立成功結果檔。
+舊版本已完成的訂位不會自動補回完整結果；請保留先前的終端資訊或至官網查詢。
+
+### 每輪執行紀錄：events.jsonl
+
+每行是一筆獨立 JSON 事件，使用台灣時區時間。可直接用文字編輯器閱讀。
+
+| 事件／結果 | 意義 |
+| --- | --- |
+| `run_started` | 本次查詢開始，含模型、間隔、次數上限及是否只查詢 |
+| `stage` | `homepage` 首頁、`captcha_image` 圖片、`ocr` 辨識、`query` 查詢、`select_train` 選車、`submit_ticket` 最終送出，各自的耗時與是否完成 |
+| `ocr` | 是否產生可接受候選及模型分數，不保存辨識文字；分數不是準確率 |
+| `attempt_finished` | 每輪結果：`ocr_no_candidate`、`captcha_rejected`、`no_matching_train`、`query_match` 或 `booked`；異常時也會記錄停止分類 |
+| `run_stopped` | 非正常停止，含發生階段與分類，例如 `network_timeout`、`network_error`、`http_error`、`website_rejected`、`ocr_unavailable`、`booking_unconfirmed` 或 `interrupted` |
+| `run_finished` | 成功完成，或達到次數上限 |
+| `result_save_failed` / `state_update_failed` | 已成功訂位，但完整結果或防重送狀態更新失敗 |
+
+`elapsed_ms` 單位為毫秒。每輪耗時不含輪次之間的等待；整次執行耗時包含重試等待，但不含啟動前的排程等待、瀏覽器啟動或模型預載。
+網路錯誤分類依傳輸層提供的例外：瀏覽器包裝為一般連線失敗的逾時會列為 `network_error`。
+`stage` 的 completed 只表示該呼叫正常回傳，網站是否接受仍需看後續事件。
+
+可列出最近的紀錄：
+
+```powershell
+Get-ChildItem .\booking.local.runs -Recurse -File | Sort-Object LastWriteTime -Descending
+```
+
+### 資料與存檔失敗
+
+- 執行紀錄不保存身分證、手機、驗證碼、訂位代碼、網站原始 HTML、表單或原始錯誤文字；完整結果檔包含訂位代碼與行程，不含證號、手機、驗證碼。
+- `*.runs/` 已加入 Git 忽略。這些檔案是本機明文，完整結果仍應自行保管。
+- 成功訂位先顯示終端結果，再保存檔案；若寫入失敗，會提醒保留終端資訊，不因紀錄問題重新訂位。
+- 狀態檔更新使用暫存檔替換，更新失敗時保留原防重送紀錄。執行紀錄無法寫入只提醒一次，後續停止記錄。
+- `--validate-config` 不產生執行紀錄。紀錄從實際進入自動流程開始，不記錄設定錯誤、排程等待期間中斷或啟動失敗。
+
 ## 驗證範圍
 
 本功能以人工 HTML fixtures 與本機瀏覽器攔截回應測試，涵蓋排程、次秒間隔、車次優先順序、
@@ -165,3 +235,4 @@ notepad booking.local.json
 
 2026-09-25 自動訂位階段：完整測試（含本機 Chrome 測試）119 項通過、1 項實站測試跳過。
 後續驗證碼重試與模型評估更新：預設離線測試 127 項通過、11 項跳過（10 項需明確啟用的瀏覽器測試、1 項實站測試），Flake8 通過。
+結果保存與執行紀錄更新：預設離線測試 136 項通過、11 項跳過；測試涵蓋完整結果、敏感資料排除、獨立執行目錄及存檔失敗不重送。

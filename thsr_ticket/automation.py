@@ -4,8 +4,10 @@ import math
 import os
 import re
 import time
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from requests import RequestException, Timeout, HTTPError
 from typing import List, Literal
 
 from bs4 import BeautifulSoup
@@ -20,6 +22,7 @@ from thsr_ticket.view_model.avail_trains import AvailTrains
 from thsr_ticket.view_model.booking_result import BookingResult
 from thsr_ticket.view_model.error_feedback import ErrorFeedback
 from thsr_ticket.view.web.show_booking_result import ShowBookingResult
+from thsr_ticket.run_records import RunRecords, atomic_json
 
 
 TAIPEI = timezone(timedelta(hours=8))
@@ -130,11 +133,15 @@ def wait_until(target, now=lambda: datetime.now(TAIPEI), sleep=time.sleep):
         sleep(min(remaining, 30))
 
 
+class WebsiteRejected(RuntimeError):
+    pass
+
+
 def check_errors(response):
     response.raise_for_status()
     errors = ErrorFeedback().parse(response.content)
     if errors:
-        raise RuntimeError('網站拒絕本次操作，已停止：' + '；'.join(error.msg for error in errors))
+        raise WebsiteRejected('網站拒絕本次操作，已停止：' + '；'.join(error.msg for error in errors))
 
 
 def no_seats_response(response):
@@ -158,29 +165,100 @@ class AutomationRunner:
         self.config, self.client, self.reader = config, client, reader
         self.state_path = Path(state_path)
         self.sleep = sleep
+        self.records = None
+        self.attempt = 0
+        self.phase = 'starting'
+
+    @contextmanager
+    def measure(self, phase):
+        self.phase = phase
+        start = time.perf_counter()
+        completed = False
+        try:
+            yield
+            completed = True
+        finally:
+            self.records.event('stage', attempt=self.attempt, phase=phase,
+                               outcome='completed' if completed else 'failed',
+                               elapsed_ms=round((time.perf_counter() - start) * 1000, 3))
+
+    def finish_attempt(self, outcome):
+        if self.attempt_finished:
+            return
+        self.attempt_finished = True
+        self.records.event('attempt_finished', attempt=self.attempt, outcome=outcome,
+                           elapsed_ms=round((time.perf_counter() - self.attempt_started) * 1000, 3))
 
     def run(self, query_only=False):
+        self.records = RunRecords(self.state_path)
+        self.attempt = 0
+        self.phase = 'starting'
+        started = time.perf_counter()
+        self.records.event('run_started', query_only=query_only, ocr_model=self.config.ocr_model,
+                           max_attempts=self.config.max_attempts, interval_seconds=self.config.interval_seconds)
+        print(f'執行紀錄：{self.records.events_path}')
+        try:
+            result = self._run(query_only)
+        except (Exception, KeyboardInterrupt) as exc:
+            if isinstance(exc, KeyboardInterrupt):
+                reason = 'interrupted'
+            elif self.phase in ('submit_ticket', 'parse_result'):
+                reason = 'booking_unconfirmed'
+            elif isinstance(exc, Timeout):
+                reason = 'network_timeout'
+            elif isinstance(exc, HTTPError):
+                reason = 'http_error'
+            elif isinstance(exc, RequestException):
+                reason = 'network_error'
+            elif isinstance(exc, WebsiteRejected):
+                reason = 'website_rejected'
+            elif self.phase == 'ocr':
+                reason = 'ocr_unavailable'
+            elif isinstance(exc, ValueError):
+                reason = 'invalid_response_or_config'
+            else:
+                reason = 'operation_failed'
+            # Do not store exception text: it may contain website content or personal data.
+            if self.attempt:
+                self.finish_attempt(reason)
+            self.records.event('run_stopped', reason=reason, phase=self.phase, attempt=self.attempt,
+                               elapsed_ms=round((time.perf_counter() - started) * 1000, 3))
+            raise
+        self.records.event('run_finished', outcome='success' if result else 'attempt_limit',
+                           elapsed_ms=round((time.perf_counter() - started) * 1000, 3))
+        return result
+
+    def _run(self, query_only=False):
         if not query_only and self.state_path.exists():
             raise RuntimeError(f'已有訂位送出紀錄，請先確認訂位狀態：{self.state_path}')
         for attempt in range(1, self.config.max_attempts + 1):
+            self.attempt = attempt
+            self.attempt_finished = False
+            self.attempt_started = time.perf_counter()
             print(f'第 {attempt}/{self.config.max_attempts} 次查詢。')
-            first = self.client.request_booking_page()
+            with self.measure('homepage'):
+                first = self.client.request_booking_page()
             check_errors(first)
             page = BeautifulSoup(first.content, 'html.parser')
             _parse_types_of_trip_value(page)
-            image = self.client.request_security_code_img(first.content)
+            with self.measure('captcha_image'):
+                image = self.client.request_security_code_img(first.content)
             image.raise_for_status()
-            guess = self.reader.recognize(image.content)
+            with self.measure('ocr'):
+                guess = self.reader.recognize(image.content)
+            self.records.event('ocr', attempt=attempt, outcome='candidate' if guess else 'no_candidate',
+                               score=guess.score if guess else None)
             if guess is None:
                 if self.reader.unavailable:
                     raise RuntimeError('OCR 模型無法運作，已停止；請檢查套件與模型。')
-                self.retry(attempt, '驗證碼無可靠辨識結果，未送出查詢')
+                self.retry(attempt, '驗證碼無可靠辨識結果，未送出查詢', 'ocr_no_candidate')
                 continue
             model = self.config.build_booking(self.config.dict(), _parse_search_by(page),
                                               _parse_seat_prefer_value(page), guess.text)
-            reply = self.client.submit_booking_form(json.loads(model.json(by_alias=True)))
+            with self.measure('query'):
+                reply = self.client.submit_booking_form(json.loads(model.json(by_alias=True)))
             if captcha_rejected(reply):
-                self.retry(attempt, '網站回覆驗證碼錯誤')
+                self.retry(attempt, '網站回覆驗證碼錯誤', 'captcha_rejected')
                 continue
             selected = None
             if not no_seats_response(reply):
@@ -193,15 +271,19 @@ class AutomationRunner:
             if selected is not None:
                 print(f'符合條件：{selected.id:04d}，{selected.depart} → {selected.arrive}')
                 if query_only:
+                    self.finish_attempt('query_match')
                     print('僅查詢模式結束，未送出訂位。')
                     return True
                 self.book(selected)
+                self.finish_attempt('booked')
                 return True
-            self.retry(attempt, '沒有符合條件的車次')
+            self.retry(attempt, '沒有符合條件的車次', 'no_matching_train')
         print('已達查詢次數上限，未送出訂位。')
         return False
 
-    def retry(self, attempt, reason):
+    def retry(self, attempt, reason, outcome):
+        self.finish_attempt(outcome)
+        self.phase = 'retry_wait'
         if attempt < self.config.max_attempts:
             print(f'{reason}，{self.config.interval_seconds:g} 秒後重新取得首頁與驗證碼。')
             self.sleep(self.config.interval_seconds)
@@ -210,7 +292,8 @@ class AutomationRunner:
 
     def book(self, selected):
         train = ConfirmTrainModel(selected_train=selected.form_value)
-        response = self.client.submit_train(json.loads(train.json(by_alias=True)))
+        with self.measure('select_train'):
+            response = self.client.submit_train(json.loads(train.json(by_alias=True)))
         check_errors(response)
         page = BeautifulSoup(response.content, 'html.parser')
         model = ConfirmTicketModel(personal_id=self.config.personal_id, phone_num=self.config.phone_num,
@@ -222,15 +305,26 @@ class AutomationRunner:
             handle.flush()
             os.fsync(handle.fileno())
         try:
-            result = self.client.submit_ticket(json.loads(model.json(by_alias=True)))
+            with self.measure('submit_ticket'):
+                result = self.client.submit_ticket(json.loads(model.json(by_alias=True)))
+            self.phase = 'parse_result'
             check_errors(result)
             tickets = BookingResult().parse(result.content)
             if not tickets or any(not ticket.id.strip() for ticket in tickets):
                 raise ValueError('缺少訂位代碼。')
         except Exception as exc:
             raise RuntimeError('訂位已嘗試送出，結果尚未確認；請至官網確認，勿直接重跑。') from exc
-        self.state_path.write_text(json.dumps(
-            {'status': 'booked', 'booking_codes': [ticket.id for ticket in tickets]}, ensure_ascii=False),
-            encoding='utf-8')
         ShowBookingResult().show(tickets)
         print('訂位成功，已停止；尚未付款。')
+        self.phase = 'save_result'
+        try:
+            self.records.save_result(tickets, self.config.outbound_date)
+            print(f'完整訂位結果：{self.records.result_path}')
+        except OSError:
+            self.records.event('result_save_failed')
+            print('訂位已成功，但完整結果無法存檔，請保留上方終端結果；勿重新訂位。')
+        try:
+            atomic_json(self.state_path, {'status': 'booked', 'booking_codes': [ticket.id for ticket in tickets]})
+        except OSError:
+            self.records.event('state_update_failed')
+            print('訂位已成功，但狀態檔更新失敗；原防重送紀錄仍保留，請先確認訂位。')
