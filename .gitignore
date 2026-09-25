@@ -14,3 +14,4 @@ test.py
 booking.local.json
 *.state.json
 *.runs/
+*.archive.lock

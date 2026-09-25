@@ -25,7 +25,14 @@ def main() -> int:
     checks = parser.add_mutually_exclusive_group()
     checks.add_argument('--check-connection', action='store_true', help='只測試首頁、表單及驗證碼，不送出查詢或訂票')
     checks.add_argument('--query-only', action='store_true', help='查詢並列出車次後停止，不選車或訂票')
+    checks.add_argument('--show-bookings', action='store_true', help='離線查看 --config 對應的訂位結果與封存紀錄')
+    checks.add_argument('--archive-booking', metavar='CODE', help='以訂位代碼確認封存本機成功紀錄，不取消官網訂位')
     args = parser.parse_args()
+    management = args.show_bookings or args.archive_booking is not None
+    if management and not args.config:
+        parser.error('訂位紀錄管理必須搭配 --config。')
+    if management and (args.validate_config or args.browser or args.headless or args.auto_captcha):
+        parser.error('訂位紀錄管理不能與驗證設定或瀏覽器、OCR 選項一起使用。')
     if args.validate_config and not args.config:
         parser.error('--validate-config 必須搭配 --config。')
     if args.config and args.check_connection:
@@ -34,6 +41,13 @@ def main() -> int:
         parser.error('--headless 必須搭配 --browser。')
     client = None
     try:
+        if management:
+            from thsr_ticket.booking_records import show_bookings, archive_booking
+            if args.show_bookings:
+                show_bookings(args.config)
+            else:
+                archive_booking(args.config, args.archive_booking)
+            return 0
         config = None
         if args.config:
             from thsr_ticket.automation import AutomationConfig, AutomationRunner, wait_until

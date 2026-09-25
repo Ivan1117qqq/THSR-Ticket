@@ -226,6 +226,40 @@ Get-ChildItem .\booking.local.runs -Recurse -File | Sort-Object LastWriteTime -D
 - 狀態檔更新使用暫存檔替換，更新失敗時保留原防重送紀錄。執行紀錄無法寫入只提醒一次，後續停止記錄。
 - `--validate-config` 不產生執行紀錄。紀錄從實際進入自動流程開始，不記錄設定錯誤、排程等待期間中斷或啟動失敗。
 
+## 查看、封存與準備下一筆
+
+查看目前的防重送狀態、完整行程與已封存紀錄：
+
+```powershell
+.\.venv\windows\Scripts\python.exe -m thsr_ticket.main --config booking.local.json --show-bookings
+```
+
+這個指令只根據 `--config` 的路徑定位紀錄，不讀取設定檔中的個資或驗證乘車日期，因此過期行程仍可查看。
+紀錄顯示的是當時保存的資料，不會查詢官網的即時付款、取消或車次狀態。
+舊版只有狀態檔時，會顯示訂位代碼，無法自行補出完整行程。損壞的結果檔會提示並略過，不刪除。
+
+確認要保留原紀錄並準備下一筆時，用**目前狀態檔中的訂位代碼**確認封存：
+
+```powershell
+# YOUR_CODE 是佔位文字，請換成查看指令顯示的代碼
+.\.venv\windows\Scripts\python.exe -m thsr_ticket.main --config booking.local.json --archive-booking YOUR_CODE
+```
+
+封存後：
+
+1. 原 `booking.local.state.json` 移至 `booking.local.runs/archives/<獨立封存代碼>/state.json`，內容原樣保存。
+2. 各次執行的 `result.json` 與 `events.jsonl` 留在原處，仍可用查看指令閱讀結果。
+3. 原防重送阻擋解除，但程式不會接著訂票；你需要先更新行程，再自行啟動。
+
+封存不是取消或付款，官網原訂位仍然存在。尚未確認結果的 `submission_pending`、未知狀態、
+無有效代碼或損壞紀錄一律不自動封存；請先確認官網訂位及程式是否仍在執行，再人工處理。
+代碼不符或檔案移動失敗時，原紀錄仍保留。
+
+封存指令以 `.archive.lock` 避免同時封存，正常結束時移除鎖檔。若封存程序被強制終止而遺留鎖檔，
+確認沒有其他封存程序執行後才可人工移除；不要在訂位程式仍執行時封存紀錄。
+封存檔位於已被 Git 忽略的 `*.runs/` 中，鎖檔也已加入忽略清單。
+紀錄管理選項不可與 `--query-only`、瀏覽器、OCR 或驗證設定選項混用。
+
 ## 驗證範圍
 
 本功能以人工 HTML fixtures 與本機瀏覽器攔截回應測試，涵蓋排程、次秒間隔、車次優先順序、
@@ -236,3 +270,4 @@ Get-ChildItem .\booking.local.runs -Recurse -File | Sort-Object LastWriteTime -D
 2026-09-25 自動訂位階段：完整測試（含本機 Chrome 測試）119 項通過、1 項實站測試跳過。
 後續驗證碼重試與模型評估更新：預設離線測試 127 項通過、11 項跳過（10 項需明確啟用的瀏覽器測試、1 項實站測試），Flake8 通過。
 結果保存與執行紀錄更新：預設離線測試 136 項通過、11 項跳過；測試涵蓋完整結果、敏感資料排除、獨立執行目錄及存檔失敗不重送。
+訂位紀錄管理更新：預設離線測試 148 項通過、11 項跳過，Flake8 通過；涵蓋舊紀錄、完整結果、封存保留原內容、待確認拒絕、代碼不符、損壞檔案與移動失敗。
