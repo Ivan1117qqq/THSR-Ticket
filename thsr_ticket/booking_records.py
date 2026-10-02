@@ -1,11 +1,13 @@
 """Inspect and archive local records without reading personal config or connecting."""
 import json
+import hashlib
 import builtins
 from functools import partial
 from pathlib import Path
 from uuid import uuid4
 
-from thsr_ticket.run_records import timestamp
+from thsr_ticket.run_records import timestamp, atomic_json
+from thsr_ticket.record_lock import record_lock
 
 
 def record_paths(config_path):
@@ -80,6 +82,12 @@ def show_bookings(config_path, output=None):
 
 
 def archive_booking(config_path, expected_code, output=None):
+    state, _ = record_paths(config_path)
+    with record_lock(state):
+        return _archive_booking(config_path, expected_code, output)
+
+
+def _archive_booking(config_path, expected_code, output=None):
     print = partial(builtins.print, file=output)
     state, runs = record_paths(config_path)
     # A dedicated lock serializes archive commands. Booking cannot pass the existing state marker.
@@ -114,3 +122,88 @@ def archive_booking(config_path, expected_code, output=None):
     finally:
         if acquired:
             lock.unlink()
+
+
+def pending_fingerprint(config_path):
+    state, _ = record_paths(config_path)
+    return hashlib.sha256(state.read_bytes()).hexdigest()
+
+
+def resolve_pending(config_path, outcome, expected_fingerprint, confirmed=False, code=''):
+    """Archive uncertain local state only after explicit manual verification; no website mutation."""
+    if not confirmed or outcome not in ('booked', 'not_booked', 'cancelled'):
+        raise ValueError('請先核對官網訂位結果，再選擇確認結果。')
+    if outcome == 'booked' and not code.strip():
+        raise ValueError('確認已訂位時請填入官網顯示的訂位代碼。')
+    state, runs = record_paths(config_path)
+    with record_lock(state):
+        if pending_fingerprint(config_path) != expected_fingerprint:
+            raise ValueError('紀錄已變更，請重新整理後再確認。')
+        data = read_object(state)
+        if data.get('status') != 'submission_pending':
+            raise ValueError('此操作只適用結果待確認的紀錄。')
+        directory = runs / 'archives' / uuid4().hex
+        if not directory.resolve().is_relative_to(runs.resolve()):
+            raise ValueError('封存路徑超出紀錄目錄。')
+        directory.mkdir(parents=True, exist_ok=False)
+        atomic_json(directory / 'resolution.json', {
+            'confirmed_at': timestamp(), 'source': 'user_verified', 'outcome': outcome,
+            'booking_code': code.strip() if outcome == 'booked' else '',
+        })
+        # Original bytes are kept. If the rename fails, the blocking state remains.
+        state.rename(directory / 'state.json')
+        return directory
+
+
+def record_entries(config_path):
+    """Structured view for the desktop; never includes passenger credentials."""
+    state, runs = record_paths(config_path)
+    entries = []
+    active_codes = []
+    if state.exists():
+        try:
+            current = read_object(state)
+            if current.get('status') == 'booked':
+                active_codes = booking_codes(current)
+                for code in active_codes:
+                    entries.append({'status': 'booked', 'code': code, 'current': True, 'ticket': {}})
+            else:
+                entries.append({'status': current.get('status', 'unknown'), 'code': '', 'current': True,
+                                'ticket': {'date': str(current.get('outbound_date', '—')),
+                                           'train_id': str(current.get('train_id', '—'))},
+                                'fingerprint': pending_fingerprint(config_path)})
+        except (ValueError, OSError):
+            entries.append({'status': 'unreadable', 'code': '', 'current': True, 'ticket': {}})
+    for path in sorted(runs.glob('*/result.json'), key=lambda item: item.stat().st_mtime, reverse=True):
+        try:
+            data = read_object(path)
+            for ticket in data.get('tickets', []):
+                if not isinstance(ticket, dict) or not ticket.get('id'):
+                    continue
+                match = next((item for item in entries if item['code'] == ticket['id']), None)
+                if match is None:
+                    match = {'status': 'history', 'code': ticket['id'], 'current': False, 'ticket': {}}
+                    entries.append(match)
+                if not match['ticket']:
+                    match['ticket'] = {key: str(ticket.get(key, '')) for key in (
+                        'date', 'start_station', 'dest_station', 'train_id', 'depart_time', 'arrival_time',
+                        'seat', 'seat_class', 'price', 'payment_deadline', 'ticket_num_info')}
+        except (ValueError, OSError, TypeError):
+            continue
+    for path in sorted(runs.glob('archives/*/state.json')):
+        try:
+            data = read_object(path)
+            codes = data.get('booking_codes', [])
+            resolution = path.parent / 'resolution.json'
+            if resolution.exists():
+                resolved = read_object(resolution)
+                code = resolved.get('booking_code', '')
+                entries.append({'status': 'resolved', 'code': code, 'current': False, 'ticket': {},
+                                'resolution': resolved.get('outcome', '')})
+            else:
+                for code in codes:
+                    if not any(item['code'] == code for item in entries):
+                        entries.append({'status': 'history', 'code': code, 'current': False, 'ticket': {}})
+        except (ValueError, OSError, TypeError):
+            continue
+    return entries

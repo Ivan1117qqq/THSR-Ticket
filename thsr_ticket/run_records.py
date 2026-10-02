@@ -29,7 +29,7 @@ def atomic_json(path, data):
 
 
 class RunRecords:
-    def __init__(self, state_path):
+    def __init__(self, state_path, event_sink=None):
         state_path = Path(state_path)
         base = state_path.name.removesuffix('.state.json')
         self.run_id = uuid4().hex
@@ -37,8 +37,14 @@ class RunRecords:
         self.events_path = self.directory / 'events.jsonl'
         self.result_path = self.directory / 'result.json'
         self.disabled = False
+        self.event_sink = event_sink
 
     def event(self, event, **fields):
+        if self.event_sink is not None:
+            try:
+                self.event_sink({'event': event, **fields})
+            except Exception:
+                pass  # UI reporting must never interrupt or repeat a booking.
         if self.disabled:
             return
         try:

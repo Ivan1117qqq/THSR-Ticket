@@ -7,6 +7,8 @@ from thsr_ticket.booking_records import archive_booking, record_paths, show_book
 from thsr_ticket.run_records import RunRecords
 from thsr_ticket.unittest.test_current_flow import html
 from thsr_ticket.view_model.booking_result import BookingResult
+from thsr_ticket.booking_records import pending_fingerprint, resolve_pending, record_entries
+from thsr_ticket.record_lock import record_lock
 
 
 @pytest.fixture
@@ -16,6 +18,56 @@ def files(tmp_path):
     state, runs = record_paths(config)
     state.write_text(json.dumps({'status': 'booked', 'booking_codes': ['TEST1234']}))
     return config, state, runs
+
+
+@pytest.mark.parametrize('outcome', ['booked', 'not_booked', 'cancelled'])
+def test_verified_pending_preserves_original(files, outcome):
+    config, state, _ = files
+    state.write_text('{"status": "submission_pending", "train_id": 117}')
+    original = state.read_bytes()
+    fingerprint = pending_fingerprint(config)
+    with pytest.raises(ValueError):
+        resolve_pending(config, outcome, fingerprint, code='TEST1234')
+    assert state.read_bytes() == original
+    directory = resolve_pending(config, outcome, fingerprint, confirmed=True, code='TEST1234')
+    assert not state.exists()
+    assert (directory / 'state.json').read_bytes() == original
+    assert json.loads((directory / 'resolution.json').read_text())['outcome'] == outcome
+    assert record_entries(config)[0]['status'] == 'resolved'
+
+
+def test_pending_stale_or_missing_code_keeps_blocker(files):
+    config, state, _ = files
+    state.write_text('{"status":"submission_pending"}')
+    fingerprint = pending_fingerprint(config)
+    with pytest.raises(ValueError):
+        resolve_pending(config, 'booked', fingerprint, confirmed=True)
+    state.write_text('{"status":"submission_pending","train_id":117}')
+    original = state.read_bytes()
+    with pytest.raises(ValueError):
+        resolve_pending(config, 'not_booked', fingerprint, confirmed=True)
+    assert state.read_bytes() == original
+
+
+def test_active_operation_prevents_archive_and_releases_lock(files):
+    config, state, _ = files
+    with record_lock(state):
+        with pytest.raises(RuntimeError):
+            archive_booking(config, 'TEST1234')
+        assert state.exists()
+    archive_booking(config, 'TEST1234')
+    assert not state.exists()
+
+
+def test_pending_move_failure_preserves_blocker(files, monkeypatch):
+    config, state, _ = files
+    state.write_text('{"status":"submission_pending"}')
+    original = state.read_bytes()
+    monkeypatch.setattr(type(state), 'rename', Mock(side_effect=OSError('test failure')))
+    with pytest.raises(OSError):
+        resolve_pending(config, 'not_booked', pending_fingerprint(config), confirmed=True)
+    assert state.read_bytes() == original
+    assert len(record_entries(config)) == 1
 
 
 def test_show_complete_and_legacy_records(files, capsys):

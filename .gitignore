@@ -15,3 +15,4 @@ booking.local.json
 *.state.json
 *.runs/
 *.archive.lock
+*.operation.lock

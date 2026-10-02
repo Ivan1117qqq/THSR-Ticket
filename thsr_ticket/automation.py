@@ -23,6 +23,7 @@ from thsr_ticket.view_model.booking_result import BookingResult
 from thsr_ticket.view_model.error_feedback import ErrorFeedback
 from thsr_ticket.view.web.show_booking_result import ShowBookingResult
 from thsr_ticket.run_records import RunRecords, atomic_json
+from thsr_ticket.record_lock import record_lock
 
 
 TAIPEI = timezone(timedelta(hours=8))
@@ -161,13 +162,14 @@ def captcha_rejected(response):
 
 
 class AutomationRunner:
-    def __init__(self, config, client, reader, state_path, sleep=time.sleep):
+    def __init__(self, config, client, reader, state_path, sleep=time.sleep, event_sink=None):
         self.config, self.client, self.reader = config, client, reader
         self.state_path = Path(state_path)
         self.sleep = sleep
         self.records = None
         self.attempt = 0
         self.phase = 'starting'
+        self.event_sink = event_sink
 
     @contextmanager
     def measure(self, phase):
@@ -190,7 +192,7 @@ class AutomationRunner:
                            elapsed_ms=round((time.perf_counter() - self.attempt_started) * 1000, 3))
 
     def run(self, query_only=False):
-        self.records = RunRecords(self.state_path)
+        self.records = RunRecords(self.state_path, event_sink=self.event_sink)
         self.attempt = 0
         self.phase = 'starting'
         started = time.perf_counter()
@@ -198,7 +200,8 @@ class AutomationRunner:
                            max_attempts=self.config.max_attempts, interval_seconds=self.config.interval_seconds)
         print(f'執行紀錄：{self.records.events_path}')
         try:
-            result = self._run(query_only)
+            with record_lock(self.state_path):
+                result = self._run(query_only)
         except (Exception, KeyboardInterrupt) as exc:
             if isinstance(exc, KeyboardInterrupt):
                 reason = 'interrupted'
@@ -270,6 +273,8 @@ class AutomationRunner:
                 selected = self.config.select(AvailTrains().parse(reply.content))
             if selected is not None:
                 print(f'符合條件：{selected.id:04d}，{selected.depart} → {selected.arrive}')
+                self.records.event('train_selected', train_id=f'{selected.id:04d}',
+                                   depart=selected.depart, arrive=selected.arrive)
                 if query_only:
                     self.finish_attempt('query_match')
                     print('僅查詢模式結束，未送出訂位。')
@@ -301,7 +306,8 @@ class AutomationRunner:
         # Exclusive creation prevents two processes using this config from submitting twice.
         # Keep this marker even if the POST, parsing, or process fails afterwards.
         with self.state_path.open('x', encoding='utf-8') as handle:
-            json.dump({'status': 'submission_pending', 'train_id': selected.id}, handle)
+            json.dump({'status': 'submission_pending', 'train_id': selected.id,
+                       'outbound_date': self.config.outbound_date, 'run_id': self.records.run_id}, handle)
             handle.flush()
             os.fsync(handle.fileno())
         try:
