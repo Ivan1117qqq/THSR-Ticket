@@ -18,6 +18,35 @@ def values():
                 phone_num='', interval_seconds='0.5', max_attempts='3', ocr_model='standard')
 
 
+def test_eye_toggle_preserves_value_and_resets():
+    tk = pytest.importorskip('tkinter')
+    from thsr_ticket.gui import masked_entry
+    try:
+        root = tk.Tk()
+    except tk.TclError:
+        pytest.skip('Tk display unavailable')
+    root.withdraw()
+    try:
+        variable = tk.StringVar(root, value='TEST1234')
+        frame, entry, button, hide = masked_entry(root, variable)
+        frame.pack()
+        assert entry.cget('show') == '*'
+        button.invoke()
+        assert entry.cget('show') == ''
+        assert button.cget('text') == '隱藏'
+        button.invoke()
+        assert entry.cget('show') == '*'
+        button.invoke()
+        hide()
+        assert entry.cget('show') == '*'
+        assert variable.get() == 'TEST1234'
+        button.configure(state='disabled')
+        button.invoke()
+        assert entry.cget('show') == '*'
+    finally:
+        root.destroy()
+
+
 def test_form_mapping_and_validation():
     config = form_config(values())
     assert config.start_station == 2 and config.dest_station == 12
@@ -143,7 +172,6 @@ def test_desktop_load_validate_save_without_network(tmp_path, monkeypatch, actio
         try:
             buttons = {widget.cget('text'): widget for widget in widgets(root) if isinstance(widget, ttk.Button)}
             buttons['載入設定'].invoke()
-            buttons['驗證設定'].invoke()
             button = {'save_as': '另存設定', 'cancel': '另存設定', 'query': '只查票',
                       'book': '自動訂位（不付款）'}.get(action, '儲存設定')
             buttons[button].invoke()
@@ -180,10 +208,10 @@ def test_desktop_load_validate_save_without_network(tmp_path, monkeypatch, actio
         raise failures[0]
 
 
-@pytest.mark.parametrize('mode', ['archive', 'cancel', 'wrong_code', 'pending', 'blocked_start'])
+@pytest.mark.parametrize('mode', ['archive', 'cancel', 'pending', 'blocked_start', 'resolve', 'unconfirmed'])
 def test_desktop_record_management(tmp_path, monkeypatch, mode):
     tk = pytest.importorskip('tkinter')
-    from tkinter import filedialog, messagebox, simpledialog, ttk
+    from tkinter import filedialog, messagebox, ttk
     from thsr_ticket.gui import main
     try:
         root = tk.Tk()
@@ -193,7 +221,8 @@ def test_desktop_record_management(tmp_path, monkeypatch, mode):
     path = tmp_path / 'booking.local.json'
     path.write_text(form_config(values()).json(), encoding='utf-8')
     state = path.with_suffix('.state.json')
-    state.write_text(json.dumps({'status': 'submission_pending' if mode == 'pending' else 'booked',
+    pending = mode in ('pending', 'resolve', 'unconfirmed')
+    state.write_text(json.dumps({'status': 'submission_pending' if pending else 'booked',
                                  'booking_codes': ['TEST1234']}))
     original = state.read_bytes()
     monkeypatch.setattr(tk, 'Tk', lambda: root)
@@ -202,8 +231,8 @@ def test_desktop_record_management(tmp_path, monkeypatch, mode):
     errors, info = Mock(), Mock()
     monkeypatch.setattr(messagebox, 'showerror', errors)
     monkeypatch.setattr(messagebox, 'showinfo', info)
-    prompt = Mock(return_value=None if mode == 'cancel' else 'WRONG' if mode == 'wrong_code' else 'TEST1234')
-    monkeypatch.setattr(simpledialog, 'askstring', prompt)
+    prompt = Mock(return_value=mode != 'cancel')
+    monkeypatch.setattr(messagebox, 'askyesno', prompt)
     forbidden = Mock(side_effect=AssertionError('Must not start worker'))
     monkeypatch.setattr('thsr_ticket.gui.run_background', forbidden)
     failures = []
@@ -223,9 +252,23 @@ def test_desktop_record_management(tmp_path, monkeypatch, mode):
                 buttons['自動訂位（不付款）'].invoke()
                 tabs = next(widget for widget in all_widgets if isinstance(widget, ttk.Notebook))
                 assert tabs.tab(tabs.select(), 'text') == '訂位紀錄'
+            elif mode in ('resolve', 'unconfirmed'):
+                buttons['處理待確認'].invoke()
+                dialog = next(widget for widget in widgets(root) if isinstance(widget, tk.Toplevel))
+                for widget in widgets(dialog):
+                    if isinstance(widget, ttk.Radiobutton) and widget.cget('value') == 'not_booked':
+                        widget.invoke()
+                    if mode == 'resolve' and isinstance(widget, ttk.Checkbutton):
+                        widget.invoke()
+                confirm = next(widget for widget in widgets(dialog)
+                               if isinstance(widget, ttk.Button) and widget.cget('text') == '確認並移至歷史')
+                confirm.invoke()
+                if mode == 'unconfirmed':
+                    errors.assert_called_once()
+                    dialog.destroy()
             else:
-                buttons['封存目前訂位'].invoke()
-            if mode == 'archive':
+                buttons['移至歷史'].invoke()
+            if mode in ('archive', 'resolve'):
                 assert not state.exists()
                 archives = list((tmp_path / 'booking.local.runs').glob('archives/*/state.json'))
                 assert len(archives) == 1 and archives[0].read_bytes() == original
