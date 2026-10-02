@@ -5,13 +5,16 @@ with open("requirements.txt", "r") as in_file:
 
 setup(
     name='thsr-ticket',
-    version='0.1',
+    version='0.2.0',
     description='An automatic booking program for Taiwan High Speed Railway(THSR).',
     author='BreezeWhite',
     author_email='miyashita2010@tuta.io',
     packages=find_packages(),
     install_requires=requirements,
-    extras_require={'automation': ['playwright==1.63.0', 'ddddocr==1.6.1']},
+    package_data={'thsr_ticket.desktop': ['qml/*.qml']},
+    extras_require={'automation': ['playwright==1.63.0', 'ddddocr==1.6.1'],
+                    'desktop': ['PySide6==6.10.2', 'playwright==1.63.0', 'ddddocr==1.6.1']},
     entry_points={'console_scripts': ['thsr-ticket = thsr_ticket.main:main'],
-                  'gui_scripts': ['thsr-ticket-gui = thsr_ticket.gui:main']}
+                  'gui_scripts': ['thsr-ticket-gui = thsr_ticket.desktop.__main__:main',
+                                  'thsr-ticket-gui-legacy = thsr_ticket.gui:main']}
 )
