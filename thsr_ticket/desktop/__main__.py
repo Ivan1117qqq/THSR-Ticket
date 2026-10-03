@@ -8,11 +8,12 @@ from pathlib import Path
 from PySide6.QtCore import QStandardPaths, QUrl
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtQuickControls2 import QQuickStyle
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox
 from PySide6.QtGui import QIcon
 from PySide6 import QtSvg  # noqa: F401 - include SVG icon plugin in the desktop bundle
 
 from thsr_ticket.desktop.controller import DesktopController
+from thsr_ticket.desktop.single_instance import SingleInstance, activate_window
 from thsr_ticket.version import VERSION
 
 
@@ -20,6 +21,30 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--self-test', metavar='REPORT', help='Offline package check; no user config or booking')
     args = parser.parse_args()
+    QQuickStyle.setStyle('Basic')
+    app = QApplication(sys.argv)
+    app.setOrganizationName('THSRTicket')
+    app.setApplicationName('TravelDesk')
+    app.setApplicationVersion(VERSION)
+    app.setWindowIcon(QIcon(str(Path(__file__).parent / 'assets' / 'app.svg')))
+    instance = None
+    try:
+        if not args.self_test:
+            instance = SingleInstance(QStandardPaths.writableLocation(QStandardPaths.AppLocalDataLocation))
+            if not instance.start():
+                return 0
+        return run_app(args, app, instance)
+    except (OSError, RuntimeError) as exc:
+        if args.self_test:
+            raise
+        QMessageBox.warning(None, '無法啟動 Travel Desk', str(exc))
+        return 1
+    finally:
+        if instance:
+            instance.close()
+
+
+def run_app(args, app, instance):
     # Installer checks this named object and refuses upgrades while the application is open.
     mutex = None
     if sys.platform == 'win32' and not args.self_test:
@@ -29,12 +54,6 @@ def main():
         create_mutex.argtypes = (ctypes.c_void_p, wintypes.BOOL, wintypes.LPCWSTR)
         create_mutex.restype = wintypes.HANDLE
         mutex = create_mutex(None, False, 'TravelDeskRunning')
-    QQuickStyle.setStyle('Basic')
-    app = QApplication(sys.argv)
-    app.setOrganizationName('THSRTicket')
-    app.setApplicationName('TravelDesk')
-    app.setApplicationVersion(VERSION)
-    app.setWindowIcon(QIcon(str(Path(__file__).parent / 'assets' / 'app.svg')))
     temporary = tempfile.TemporaryDirectory(prefix='travel-desk-test-') if args.self_test else None
     controller = DesktopController(temporary.name if temporary else
                                    QStandardPaths.writableLocation(QStandardPaths.AppLocalDataLocation))
@@ -45,6 +64,8 @@ def main():
     engine.load(QUrl.fromLocalFile(str(Path(__file__).parent / 'qml' / 'Main.qml')))
     if not engine.rootObjects():
         return 1
+    if instance:
+        instance.activated.connect(lambda: activate_window(engine.rootObjects()[0]))
     if args.self_test:
         from thsr_ticket.captcha import CaptchaReader
         from playwright.sync_api import sync_playwright
