@@ -22,6 +22,7 @@ from thsr_ticket.config_store import read_config_data, write_config_data, is_pro
 from thsr_ticket.desktop.preferences import Preferences
 from thsr_ticket.desktop.updates import check_release, RELEASES
 from thsr_ticket.version import VERSION
+from thsr_ticket.task_status import load_task, save_task, booking_guard, task_view
 
 
 def defaults():
@@ -79,6 +80,12 @@ class DesktopController(QObject):
         self._protect_private = os.name == 'nt'
         self._saved_protection = self._protect_private
         self._records = []
+        self._task_snapshot = {}
+        self._guard = ''
+        self._query_only = False
+        self._stage = 'prepare'
+        self._received_completion = False
+        self._summary_warning = False
         self._status = '設定行程，開始下一段旅程。'
         self._phase = '尚未開始'
         self._attempt = 0
@@ -105,6 +112,39 @@ class DesktopController(QObject):
             self.load_path(self.path)
         elif previous:
             self.notify('上次使用的設定已移動或不存在，請重新載入；不會自動建立另一份設定。', True)
+        self.refresh()
+
+    @Property('QVariantMap', notify=changed)
+    def task(self):
+        view = task_view(self._task_snapshot, self._guard, self._running, self._stop.is_set())
+        view['step'] = {'prepare': 0, 'schedule': 1, 'homepage': 2, 'captcha_image': 2, 'ocr': 2,
+                        'query': 2, 'select_train': 3, 'submit_ticket': 4, 'parse_result': 4}.get(self._stage, 0)
+        if self._summary_warning:
+            view['detail'] += ' 任務摘要無法保存；重新開啟時可能無法顯示本次狀態。'
+        return view
+
+    def persist_task(self, code):
+        self._task_snapshot = {'code': code, 'query_only': self._query_only}
+        try:
+            save_task(self.path, code, self._query_only)
+            self._summary_warning = False
+        except (ValueError, OSError):
+            self._summary_warning = True
+
+    @Slot()
+    def taskAction(self):
+        action = self.task['action']
+        if action == 'official':
+            self.official()
+        else:
+            self.navigate({'records': 3, 'settings': 4, 'progress': 2, 'edit': 1}[action])
+
+    def record_action_finished(self):
+        self._query_only = False
+        self.persist_task('success')
+        self._recovery = ''
+        self.refresh()
+        self._phase = self.task['title']
 
     @Property(bool, notify=formChanged)
     def dirty(self):
@@ -245,9 +285,13 @@ class DesktopController(QObject):
             self._protect_private = is_protected(raw)
             self._saved_protection = self._protect_private
             self._issues = {}
+            self._summary_warning = False
+            self._log, self._attempt, self._match = '', 0, {}
+            self._recovery = ''
             self.resetSecrets.emit()
             self.formChanged.emit()
             self.refresh()
+            self._phase = self.task['title']
             self.notify('已載入設定，請核對日期與時間。')
             self.remember()
             return True
@@ -349,8 +393,12 @@ class DesktopController(QObject):
             self.notify('請檢查日期、時段、票數、身分證及儲存位置，再啟動。', True)
             return
         self._stop.clear()
+        self._query_only = query_only
+        self._stage = 'prepare'
+        self.persist_task('running')
         self._recovery = ''
         self._received_done = False
+        self._received_completion = False
         self._running, self._attempt, self._log = True, 0, ''
         self._match = {}
         self._phase = '準備啟動'
@@ -358,7 +406,14 @@ class DesktopController(QObject):
         self.notify('只查詢車次，不送出訂位。' if query_only else '自動訂位啟動，成功後停止；不付款。')
         self._thread = threading.Thread(target=self.worker,
                                         args=(config, self.path, query_only, self._stop, self._messages), daemon=False)
-        self._thread.start()
+        try:
+            self._thread.start()
+        except RuntimeError:
+            self._thread = None
+            self._running = False
+            self.persist_task('operation_failed')
+            self._phase = '任務無法啟動'
+            self.notify('無法啟動背景工作，請關閉並重新開啟 App。', True)
 
     @Slot()
     def stop(self):
@@ -407,7 +462,11 @@ class DesktopController(QObject):
                 self._log = (self._log + value)[-60000:]
             elif kind == 'phase':
                 self._phase = value
+                if value.startswith('等待啟動時間'):
+                    self._stage = 'schedule'
             elif kind == 'event':
+                if value.get('phase'):
+                    self._stage = value['phase']
                 self._attempt = value.get('attempt', self._attempt)
                 if value.get('event') == 'train_selected':
                     self._match = {key: value[key] for key in ('train_id', 'depart', 'arrive')}
@@ -417,10 +476,14 @@ class DesktopController(QObject):
                 self._phase = phases.get(value.get('phase'), self._phase)
             elif kind == 'done':
                 self._received_done = True
+                if not self._received_completion:
+                    self.persist_task('stopped' if self._stop.is_set() else 'success')
                 self._phase = value
                 self.notify(value, self._error)
                 self.refresh()
             elif kind == 'completion':
+                self._received_completion = True
+                self.persist_task(value['code'])
                 self._error = value['code'] not in ('success', 'stopped')
                 self._recovery = value['action']
             elif kind == 'update':
@@ -434,6 +497,7 @@ class DesktopController(QObject):
             self._thread = None
             self._running = False
             if not self._received_done:
+                self.persist_task('interrupted')
                 self._phase = '任務非預期結束'
                 self.notify('任務未回傳完成狀態；請先在我的訂位確認結果，勿直接重送。', True)
             self.refresh()
@@ -452,10 +516,14 @@ class DesktopController(QObject):
 
     @Slot()
     def refresh(self):
+        self._guard = booking_guard(self.path)
+        if not self._running and not self._summary_warning:
+            self._task_snapshot = load_task(self.path)
         try:
             self._records = record_entries(self.path)
             self.changed.emit()
-        except OSError:
+        except (OSError, ValueError, TypeError):
+            self._records = []
             self.notify('紀錄無法讀取，請檢查資料位置。', True)
 
     @Slot(str)
@@ -464,7 +532,7 @@ class DesktopController(QObject):
             return
         try:
             archive_booking(self.path, code, output=io.StringIO())
-            self.refresh()
+            self.record_action_finished()
             self.notify('已移至歷史，官網訂位保留。可準備下一筆。')
         except (ValueError, OSError, RuntimeError):
             self.notify('未封存：紀錄已變更、仍在執行或無法寫入，請重新整理。', True)
@@ -475,7 +543,7 @@ class DesktopController(QObject):
             return
         try:
             resolve_pending(self.path, outcome, fingerprint, confirmed=confirmed, code=code)
-            self.refresh()
+            self.record_action_finished()
             self.notify('已保存核對結果並移至歷史，官網訂位未變更。')
         except (ValueError, OSError, RuntimeError):
             self.notify('未完成：請核對官網、填寫必要代碼並勾選確認；紀錄變更時請重新整理。', True)
@@ -501,7 +569,7 @@ class DesktopController(QObject):
             return
         try:
             confirm_cancelled(self.path, code, fingerprint, confirmed)
-            self.refresh()
+            self.record_action_finished()
             self.notify('已依你的官網確認結果標記取消並封存，可準備下一筆訂位。')
         except (ValueError, OSError, RuntimeError):
             self.notify('未變更紀錄：請確認官網取消結果，並重新整理本機紀錄。', True)

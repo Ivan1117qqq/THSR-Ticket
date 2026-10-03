@@ -16,6 +16,7 @@ from thsr_ticket.desktop.controller import DesktopController, form_values  # noq
 from thsr_ticket.unittest.test_gui import values  # noqa: E402
 from thsr_ticket.application import form_config  # noqa: E402
 from thsr_ticket.booking_records import pending_fingerprint  # noqa: E402
+from thsr_ticket.task_status import save_task  # noqa: E402
 
 
 @pytest.fixture(scope='module')
@@ -36,6 +37,82 @@ def controller(qt, tmp_path):
     controller._form = values()
     yield controller
     controller.timer.stop()
+
+
+def test_startup_pending_is_visible_even_without_config(qt, tmp_path):
+    state = tmp_path / 'booking.local.state.json'
+    state.write_text('{"status":"submission_pending"}')
+    instance = DesktopController(tmp_path, worker=Mock())
+    try:
+        assert instance.task['code'] == 'pending'
+        assert not instance.task['can_book']
+        instance.taskAction()
+        assert instance.page == 3
+        instance.start(False)
+        instance.worker.assert_not_called()
+        assert state.exists()
+    finally:
+        instance.timer.stop()
+
+
+def test_reopen_failed_task_and_switch_config_resets_summary(controller, qt, tmp_path):
+    controller.save_config()
+    save_task(controller.path, 'network', True)
+    reopened = DesktopController(tmp_path, worker=Mock())
+    try:
+        assert reopened.task['code'] == 'network'
+        reopened.taskAction()
+        assert reopened.page == 1
+        reopened.worker.assert_not_called()
+        other = tmp_path / 'other.json'
+        other.write_text(form_config(values()).json(), encoding='utf-8')
+        assert reopened.load_path(other)
+        assert reopened.task['code'] == 'idle'
+    finally:
+        reopened.timer.stop()
+
+
+def test_crashed_worker_persists_interruption_without_restart(controller):
+    controller.worker = Mock()
+    controller.start(True)
+    controller._thread.join(3)
+    controller.poll()
+    assert controller.task['code'] == 'interrupted'
+    controller.worker.assert_called_once()
+    assert json.loads(controller.path.with_suffix('.task.json').read_text())['code'] == 'interrupted'
+
+
+def test_resolve_pending_clears_recovery_without_erasing_history(controller):
+    state = controller.path.with_suffix('.state.json')
+    state.write_text('{"status":"submission_pending"}')
+    save_task(controller.path, 'booking_unconfirmed', False)
+    controller.refresh()
+    controller.resolve(pending_fingerprint(controller.path), 'not_booked', '', True)
+    assert controller.task['code'] == 'finished'
+    assert controller.task['can_book']
+    assert any(row.get('resolution') == 'not_booked' for row in controller.records)
+
+
+def test_summary_save_failure_is_visible_but_never_overrides_booking(controller, monkeypatch):
+    monkeypatch.setattr('thsr_ticket.desktop.controller.save_task', Mock(side_effect=OSError()))
+    controller.persist_task('network')
+    controller.refresh()
+    assert controller.task['code'] == 'network'
+    assert '摘要無法保存' in controller.task['detail']
+    controller.path.with_suffix('.state.json').write_text('{"status":"submission_pending"}')
+    controller.refresh()
+    assert controller.task['code'] == 'pending'
+    assert not controller.task['can_book']
+
+
+def test_thread_start_failure_does_not_leave_ui_running(controller, monkeypatch):
+    thread = Mock()
+    thread.start.side_effect = RuntimeError()
+    monkeypatch.setattr('thsr_ticket.desktop.controller.threading.Thread', Mock(return_value=thread))
+    controller.start(True)
+    assert not controller.running
+    assert controller.task['code'] == 'operation_failed'
+    controller.worker.assert_not_called()
 
 
 def test_cancellation_link_does_not_change_state(controller, monkeypatch):

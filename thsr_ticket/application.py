@@ -28,7 +28,7 @@ class FieldError(ValueError):
 
 def protected_config_path(path):
     name = Path(path).name.casefold()
-    return name.endswith(('.state.json', '.example.json')) or name in ('state.json', 'result.json')
+    return name.endswith(('.state.json', '.task.json', '.example.json')) or name in ('state.json', 'result.json')
 
 
 def form_config(values):

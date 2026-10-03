@@ -66,6 +66,14 @@ def main():
             app.processEvents()
         if not window.grabWindow().save(str(destination / f'cancel-scale-{args.scale}.png')):
             raise RuntimeError('Failed to save cancellation preview')
+        QMetaObject.invokeMethod(window.findChild(QObject, 'cancellationDialog'), 'close')
+        controller.navigate(0)
+        controller._guard = 'pending'
+        controller.changed.emit()
+        for _ in range(30):
+            app.processEvents()
+        if not window.grabWindow().save(str(destination / f'recovery-scale-{args.scale}.png')):
+            raise RuntimeError('Failed to save recovery preview')
         window.setProperty('allowClose', True)
         window.close()
         controller.timer.stop()

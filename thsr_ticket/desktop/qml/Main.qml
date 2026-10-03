@@ -73,7 +73,7 @@ ApplicationWindow {
                 }
                 Item { Layout.fillHeight: true }
                 Rectangle { Layout.fillWidth: true; height: 1; color: '#294251' }
-                Text { text: backend.running ? '●  任務執行中' : '●  準備就緒'; color: '#94cdb8'; font.pixelSize: 12; Layout.topMargin: 14 }
+                Text { text: '●  ' + backend.task.title; color: '#94cdb8'; font.pixelSize: 12; Layout.topMargin: 14; Layout.fillWidth:true; wrapMode:Text.WordWrap }
                 Text { text: 'DESKTOP  /  ' + backend.version; color: '#648093'; font.pixelSize: 10; Layout.bottomMargin: 8 }
             }
         }
@@ -104,6 +104,7 @@ ApplicationWindow {
                         width: overview.availableWidth; spacing: 22
                         anchors.margins: 28
                         Item { height: 6 }
+                        TaskPanel {backend:window.backend; Layout.fillWidth:true; Layout.leftMargin:28; Layout.rightMargin:28}
                         Rectangle {
                             Layout.fillWidth: true; Layout.leftMargin: 28; Layout.rightMargin: 28; implicitHeight: 220
                             radius: 20
@@ -121,8 +122,8 @@ ApplicationWindow {
                         RowLayout {
                             Layout.fillWidth: true; Layout.leftMargin:28; Layout.rightMargin:28; spacing:18
                             Card {
-                                Layout.fillWidth:true; title:'目前任務'
-                                Text { text:backend.running ? '執行中' : '待命'; color:'#147d70'; font.pixelSize:28; font.bold:true }
+                                Layout.fillWidth:true; title:'本次查詢'
+                                Text { text:String(backend.attempt) + ' 輪'; color:'#147d70'; font.pixelSize:28; font.bold:true }
                                 Caption { text: backend.phase }
                                 AppButton { text:'查看進度'; quiet:true; onClicked:backend.navigate(2) }
                             }
@@ -198,8 +199,9 @@ ApplicationWindow {
                     ColumnLayout {
                         width:progressPage.availableWidth; spacing:20
                         Item {height:8}
+                        TaskPanel {backend:window.backend; Layout.fillWidth:true; Layout.leftMargin:28; Layout.rightMargin:28}
                         Card {
-                            Layout.fillWidth:true; Layout.leftMargin:28; Layout.rightMargin:28; title:'任務狀態'
+                            Layout.fillWidth:true; Layout.leftMargin:28; Layout.rightMargin:28; title:'執行細節'
                             RowLayout {
                                 Layout.fillWidth:true
                                 BusyIndicator {running:backend.running; visible:backend.running; implicitWidth:44; implicitHeight:44}
@@ -216,7 +218,7 @@ ApplicationWindow {
                             Caption {text:backend.form.start_station + ' → ' + backend.form.dest_station + '   ·   ' + backend.form.outbound_date}
                             RowLayout {
                                 AppButton {visible:backend.running; text:'停止任務'; onClicked:backend.stop()}
-                                AppButton {text:'查看訂位結果'; onClicked:backend.navigate(3)}
+                                AppButton {text:backend.task.label; visible:!backend.running; onClicked:backend.taskAction()}
                             }
                         }
                         Card {
@@ -359,7 +361,7 @@ ApplicationWindow {
                     }
                     Item {Layout.fillWidth:true}
                     AppButton {text:'只查票'; enabled:!backend.running; onClicked:backend.start(true)}
-                    AppButton {text:'自動訂位 · 不付款'; primary:true; enabled:!backend.running; onClicked:backend.start(false)}
+                    AppButton {text:backend.task.can_book ? '自動訂位 · 不付款' : '請先處理目前任務'; primary:true; enabled:backend.task.can_book; onClicked:backend.start(false)}
                 }
             }
             Rectangle {

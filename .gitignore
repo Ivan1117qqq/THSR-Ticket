@@ -13,6 +13,7 @@ test.py
 *.code-workspace
 booking.local.json
 *.state.json
+*.task.json
 *.runs/
 *.archive.lock
 *.operation.lock
