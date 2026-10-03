@@ -601,3 +601,10 @@ requirements-build.txt
 - 日誌有磁碟保存但沒有完整的保存期限、清理介面與集中式監控。
 
 學習時可以把每個改動都問成四件事：輸入是什麼、誰負責決策、失敗後留下什麼、用哪個測試證明。能清楚回答這四件事，就能逐步掌握整個專案，而不必一次記住所有檔名。
+## 增補：單一桌面程序
+
+`desktop/single_instance.py` 在 controller 建立前取得使用者資料目錄的 `QLockFile`，並建立限定使用者存取的 `QLocalServer`。第二個程序無法取得鎖時，只連線通知原視窗喚回，不傳送設定、證號或訂位指令。只有持鎖者可清理過期通道；鎖不因任務執行太久而過期。主入口以 `finally` 釋放鎖，崩潰後則由 Qt 的程序存活檢查處理。
+
+這是介面層的程序協調，不取代 `record_lock.py` 或訂位 state。它不攔截 CLI，也不會把待確認訂位視為可以重送。隔離 `--self-test` 刻意略過此機制。
+
+API 行為參考 [QLockFile](https://doc.qt.io/qtforpython-6/PySide6/QtCore/QLockFile.html) 與 [QLocalServer](https://doc.qt.io/qtforpython-6/PySide6/QtNetwork/QLocalServer.html)。

@@ -55,7 +55,7 @@
 | [.config/mypy.ini](../.config/mypy.ini) | 保留 make check-mypy 使用的歷史型別檢查設定；不宣稱目前全數通過。 |
 | [.config/pylintrc](../.config/pylintrc) | 保留 make check-pylint 的歷史規則；不宣稱目前全數通過。 |
 | [.github/workflows/desktop-release.yml](../.github/workflows/desktop-release.yml) | 手動執行 Windows 打包與獨立 runner 的產物驗證，不自動發布 Release。 |
-| [.github/workflows/pythonpackage.yml](../.github/workflows/pythonpackage.yml) | Python 回歸 CI：安裝依賴、格式與測試。 |
+| [.github/workflows/pythonpackage.yml](../.github/workflows/pythonpackage.yml) | push／PR 的 Linux 基礎回歸與 Windows Qt 必測工作，保存桌面 JUnit 報告。 |
 | [.gitignore](../.gitignore) | 排除 venv、build/dist、個人設定、state/runs 及鎖檔等本機內容。 |
 | [README.md](../README.md) | 使用入口、環境建置、文件導覽及功能邊界。 |
 | [TravelDesk.spec](../TravelDesk.spec) | PyInstaller 配方，明確收集 QML、圖示、OCR 與 ONNX 執行庫。 |
@@ -92,7 +92,10 @@
 | [thsr_ticket/automation.py](../thsr_ticket/automation.py) | 設定模型、排程、選車、重試、訂位與防重送核心。 |
 | [thsr_ticket/booking_records.py](../thsr_ticket/booking_records.py) | 讀取、封存、待確認核對及人工取消確認；不自動送出官網取消。 |
 | [thsr_ticket/captcha.py](../thsr_ticket/captcha.py) | 實際使用的 ddddocr 介面、CTC 候選解析及分數門檻。 |
-| [thsr_ticket/config_store.py](../thsr_ticket/config_store.py) | 設定 JSON 原子保存與 Windows DPAPI 欄位保護。 |
+| [thsr_ticket/config_store.py](../thsr_ticket/config_store.py) | 設定版本檢查、舊格式備份遷移、JSON 原子保存與 Windows DPAPI 欄位保護。 |
+| [thsr_ticket/unittest/test_config_store.py](../thsr_ticket/unittest/test_config_store.py) | 舊格式唯讀相容、首次備份、未知版本阻擋與失敗不覆寫測試。 |
+| [thsr_ticket/diagnostics.py](../thsr_ticket/diagnostics.py) | 診斷欄位與值的允許清單、事件上限及環境／狀態快照；不匯出原始日誌。 |
+| [thsr_ticket/unittest/test_diagnostics.py](../thsr_ticket/unittest/test_diagnostics.py) | 個資排除、未知型別與數值處理、事件數量及快照獨立性測試。 |
 | [thsr_ticket/configs/__init__.py](../thsr_ticket/configs/__init__.py) | 保留套件標記／初始化；Python 匯入與 setuptools 套件發現需要整體判斷，不因內容少就刪除。 |
 | [thsr_ticket/configs/common.py](../thsr_ticket/configs/common.py) | 既有日期、時間選項與票數常數，供模型與互動式 CLI 使用。 |
 | [thsr_ticket/configs/web/__init__.py](../thsr_ticket/configs/web/__init__.py) | 保留套件標記／初始化；Python 匯入與 setuptools 套件發現需要整體判斷，不因內容少就刪除。 |
@@ -111,6 +114,8 @@
 | [thsr_ticket/desktop/assets/app.svg](../thsr_ticket/desktop/assets/app.svg) | 應用程式向量圖示；Qt 與 icon 建置都使用。 |
 | [thsr_ticket/desktop/controller.py](../thsr_ticket/desktop/controller.py) | QML 的 Property/Signal/Slot、任務管理、資料操作及 queue 消費端。 |
 | [thsr_ticket/desktop/preferences.py](../thsr_ticket/desktop/preferences.py) | 只保存最近設定路徑的桌面偏好。 |
+| [thsr_ticket/desktop/single_instance.py](../thsr_ticket/desktop/single_instance.py) | 使用者資料目錄單一實例鎖、本機喚回通道與視窗還原；不接收訂位命令。 |
+| [thsr_ticket/unittest/test_single_instance.py](../thsr_ticket/unittest/test_single_instance.py) | 實際子程序重複啟動、強制結束復原、通道失敗與視窗喚回測試。 |
 | [thsr_ticket/desktop/qml/AppButton.qml](../thsr_ticket/desktop/qml/AppButton.qml) | 共用按鈕外觀與互動。 |
 | [thsr_ticket/desktop/qml/Card.qml](../thsr_ticket/desktop/qml/Card.qml) | 共用卡片容器。 |
 | [thsr_ticket/desktop/qml/Field.qml](../thsr_ticket/desktop/qml/Field.qml) | 共用欄位、眼睛遮蔽、日期時間選擇及錯誤提示。 |
@@ -137,7 +142,8 @@
 | [thsr_ticket/remote/http_request.py](../thsr_ticket/remote/http_request.py) | requests 傳輸、表單保存及同站 URL 驗證；也供瀏覽器繼承。 |
 | [thsr_ticket/remote/native_browser.py](../thsr_ticket/remote/native_browser.py) | 尋找 Chrome/Edge、獨立 profile 與程序清理。 |
 | [thsr_ticket/run_records.py](../thsr_ticket/run_records.py) | 原子 JSON、事件 JSONL、成功結果與事件通知。 |
-| [thsr_ticket/unittest/conftest.py](../thsr_ticket/unittest/conftest.py) | pytest 共用選項，控制 --live 與 --browser-tests 的明確啟用。 |
+| [thsr_ticket/unittest/conftest.py](../thsr_ticket/unittest/conftest.py) | pytest 共用選項；控制 --live／--browser-tests，並以 --require-desktop 阻擋桌面套件缺測或跳過。 |
+| [thsr_ticket/unittest/test_desktop_gate.py](../thsr_ticket/unittest/test_desktop_gate.py) | 桌面必測機制的成功、缺測、跳過與錯誤狀態回歸。 |
 | [thsr_ticket/unittest/fixtures/booking.html](../thsr_ticket/unittest/fixtures/booking.html) | 離線網站 HTML 樣本：首頁；測試讀取，不是可刪的下載快取。 |
 | [thsr_ticket/unittest/fixtures/confirmation.html](../thsr_ticket/unittest/fixtures/confirmation.html) | 離線網站 HTML 樣本：乘客確認頁；測試讀取，不是可刪的下載快取。 |
 | [thsr_ticket/unittest/fixtures/result.html](../thsr_ticket/unittest/fixtures/result.html) | 離線網站 HTML 樣本：訂位結果頁；測試讀取，不是可刪的下載快取。 |
@@ -178,4 +184,4 @@
 | [thsr_ticket/desktop/qml/TaskPanel.qml](../thsr_ticket/desktop/qml/TaskPanel.qml) | 首頁與進度頁共用狀態卡、階段與復原入口。 |
 | [thsr_ticket/unittest/test_task_status.py](../thsr_ticket/unittest/test_task_status.py) | 狀態優先序、損壞資料、摘要欄位限制與復原路由測試。 |
 
-本次文件更新後，本表共 126 個檔案；每個程式碼檔案均有獨立用途列，包含相容入口與測試。設定旁的 `*.task.json` 為本機任務摘要，已加入 Git 忽略清單；不保存個資，也不取代原有防重送紀錄。
+本次設定格式更新後，本表共 132 個檔案；每個程式碼檔案均有獨立用途列，包含相容入口與測試。設定旁的 `*.task.json` 為本機任務摘要，已加入 Git 忽略清單；不保存個資，也不取代原有防重送紀錄。
