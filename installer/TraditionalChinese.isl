@@ -1,0 +1,44 @@
+﻿[LangOptions]
+LanguageName=繁體中文
+LanguageID=$0404
+LanguageCodePage=0
+DialogFontName=Microsoft JhengHei UI
+WelcomeFontName=Microsoft JhengHei UI
+
+[Messages]
+SetupAppTitle=安裝程式
+SetupWindowTitle=安裝 - %1
+UninstallAppTitle=解除安裝
+UninstallAppFullTitle=解除安裝 %1
+InformationTitle=資訊
+ConfirmTitle=確認
+ErrorTitle=錯誤
+ButtonBack=< 上一步
+ButtonNext=下一步 >
+ButtonInstall=安裝
+ButtonOK=確定
+ButtonCancel=取消
+ButtonYes=是
+ButtonNo=否
+ButtonFinish=完成
+ButtonBrowse=瀏覽…
+WelcomeLabel1=歡迎使用 [name] 安裝程式
+WelcomeLabel2=即將在您的電腦安裝 [name/ver]。%n%n請先結束訂票任務並關閉 Travel Desk，再繼續安裝。
+WizardSelectDir=選擇安裝位置
+SelectDirDesc=您要將 [name] 安裝在哪裡？
+SelectDirLabel3=程式將安裝到以下資料夾。個人設定與訂位紀錄會保留於原位置。
+WizardSelectTasks=選擇其他工作
+SelectTasksDesc=您想執行哪些其他工作？
+SelectTasksLabel2=請選擇安裝期間需要執行的其他工作。
+WizardReady=準備安裝
+ReadyLabel1=已準備好在您的電腦安裝 [name]。
+ReadyLabel2a=按「安裝」開始，或按「上一步」檢查設定。
+WizardInstalling=正在安裝
+InstallingLabel=正在將 [name] 安裝到您的電腦，請稍候。
+FinishedHeadingLabel=[name] 安裝完成
+FinishedLabelNoIcons=安裝已完成。按「完成」結束安裝程式。
+FinishedLabel=安裝已完成。您可以從開始功能表開啟程式。
+ExitSetupTitle=離開安裝程式
+ExitSetupMessage=安裝尚未完成。確定要離開嗎？
+ConfirmUninstall=確定要解除安裝 %1 嗎？個人設定與訂位紀錄不會刪除。
+UninstalledAll=%1 已解除安裝。個人設定與訂位紀錄仍保留。

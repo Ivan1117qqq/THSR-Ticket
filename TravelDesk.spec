@@ -1,9 +1,12 @@
 # Build with: python -m PyInstaller TravelDesk.spec
 from pathlib import Path
 from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
+from scripts.build_icon import build_icon
 
 root = Path(SPECPATH)
 datas = [(str(root / 'thsr_ticket/desktop/qml'), 'thsr_ticket/desktop/qml')]
+datas += [(str(root / 'thsr_ticket/desktop/assets'), 'thsr_ticket/desktop/assets')]
+icon = build_icon(root)
 datas += collect_data_files('ddddocr')
 binaries = collect_dynamic_libs('onnxruntime')
 a = Analysis(
@@ -12,5 +15,6 @@ a = Analysis(
     excludes=['tkinter', 'pytest', 'mypy', 'pylint', 'flake8', 'thsr_ticket.unittest', 'tensorflow', 'torch'],
 )
 pyz = PYZ(a.pure)
-exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name='TravelDesk', console=False)
+exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name='TravelDesk', console=False, icon=icon,
+          version=str(root / 'installer/version_info.txt'))
 coll = COLLECT(exe, a.binaries, a.datas, name='TravelDesk')

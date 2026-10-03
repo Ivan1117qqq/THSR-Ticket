@@ -8,22 +8,21 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: [3.8]
+        python-version: ['3.13']
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v4
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v1
+      uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -r requirements.txt
+        pip install -r requirements-lock.txt
     - name: Check syntax
       run: |
-        make check
+        python -m flake8 -j1 --config .config/flake thsr_ticket
     - name: Test with pytest
       run: |
-        pip install pytest
-        make test
+        python -m pytest -q -p no:cacheprovider
