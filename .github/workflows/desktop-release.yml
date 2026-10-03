@@ -6,13 +6,22 @@ permissions:
 jobs:
   build:
     runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      QT_QPA_PLATFORM: offscreen
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
       - run: python -m pip install -r requirements-build.txt
-      - run: python -m pytest -q -p no:cacheprovider
+      - run: python -m pytest -q -p no:cacheprovider --require-desktop --junitxml=build/desktop-tests.xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: release-test-report
+          path: build/desktop-tests.xml
+          if-no-files-found: error
       - run: python -m flake8 -j1 --config .config/flake thsr_ticket scripts/preview_desktop.py
       - run: python -m PyInstaller TravelDesk.spec --noconfirm
       - name: Build unsigned installer
@@ -29,6 +38,7 @@ jobs:
   packaged-smoke:
     needs: build
     runs-on: windows-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -46,7 +56,7 @@ jobs:
           $app = Start-Process -FilePath dist/TravelDesk/TravelDesk.exe -ArgumentList '--self-test','build/package-smoke.json' -WindowStyle Hidden -Wait -PassThru
           if ($app.ExitCode -ne 0) { throw 'Packaged startup failed' }
           $report = Get-Content build/package-smoke.json | ConvertFrom-Json
-          if (-not ($report.qml -and $report.ocr_standard -and $report.ocr_beta -and $report.playwright_driver)) { throw 'Missing runtime resource' }
+          if (-not ($report.qml -and $report.ocr_standard -and $report.ocr_beta -and $report.playwright_driver -and $report.private_storage)) { throw 'Missing runtime resource' }
       - name: Installer upgrade and uninstall validation
         shell: pwsh
         run: ./scripts/test_installer.ps1 -Installer dist/installer/TravelDesk-Setup-0.3.2.exe
@@ -54,4 +64,7 @@ jobs:
         if: always()
         with:
           name: packaged-smoke-report
-          path: build/package-smoke.json
+          path: |
+            build/package-smoke.json
+            build/installer-smoke-*/package-smoke.json
+          if-no-files-found: error
