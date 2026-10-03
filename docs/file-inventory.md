@@ -1,6 +1,6 @@
 # 逐檔用途、清理依據與保留邊界
 
-盤點日期：2026-10-03；基準版本 0.3.1。搭配 [完整開發指南](development-guide.md) 閱讀。
+盤點日期：2026-10-03；現行基準版本 0.3.2。搭配 [完整開發指南](development-guide.md) 與 [後續優化計畫](roadmap.md) 閱讀。下方清理紀錄保留 0.3.1 階段的歷史依據。
 
 ## 如何判斷檔案能不能刪
 
@@ -69,6 +69,7 @@
 | [docs/file-inventory.md](../docs/file-inventory.md) | 本檔，逐檔盤點、刪除依據與本機資料分類。 |
 | [docs/gui.md](../docs/gui.md) | 保留的舊 Tk GUI 操作文件。 |
 | [docs/ocr-evaluation.md](../docs/ocr-evaluation.md) | 人工標註、離線模型比較與指標解讀。 |
+| [docs/roadmap.md](../docs/roadmap.md) | 0.3.2 功能缺口、優化優先順序、對應程式與驗收條件；不代表已實作。 |
 | [docs/verification.md](../docs/verification.md) | 各階段驗證結果與未完成項目；歷史數字不是最新總數。 |
 | [installer/TraditionalChinese.isl](../installer/TraditionalChinese.isl) | Inno Setup 使用的繁體中文安裝訊息。 |
 | [installer/TravelDesk.iss](../installer/TravelDesk.iss) | Windows 安裝、捷徑、版本及執行中保護規則。 |
@@ -177,4 +178,4 @@
 | [thsr_ticket/desktop/qml/TaskPanel.qml](../thsr_ticket/desktop/qml/TaskPanel.qml) | 首頁與進度頁共用狀態卡、階段與復原入口。 |
 | [thsr_ticket/unittest/test_task_status.py](../thsr_ticket/unittest/test_task_status.py) | 狀態優先序、損壞資料、摘要欄位限制與復原路由測試。 |
 
-0.3.2 增補後，本表共 125 個檔案。設定旁的 `*.task.json` 為本機任務摘要，已加入 Git 忽略清單；不保存個資，也不取代原有防重送紀錄。
+本次文件更新後，本表共 126 個檔案；每個程式碼檔案均有獨立用途列，包含相容入口與測試。設定旁的 `*.task.json` 為本機任務摘要，已加入 Git 忽略清單；不保存個資，也不取代原有防重送紀錄。

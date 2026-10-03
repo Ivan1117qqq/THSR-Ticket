@@ -10,6 +10,7 @@
 
 - [完整開發與架構指南](docs/development-guide.md)：從入口、QML、背景執行緒到訂位、防重送、測試與打包，依程式執行順序逐段說明。
 - [逐檔用途與清理紀錄](docs/file-inventory.md)：列出原始碼、測試、工具與文件用途，說明哪些歷史程式已移除、哪些相容功能仍需保留。
+- [後續優化與驗收計畫](docs/roadmap.md)：依優先順序列出現有缺口、對應程式與完成條件；清單中的項目尚未完成。
 - [介面遷移設計背景](docs/app-architecture.md)：保留 Qt 改版時的取捨，現行實作以完整指南為準。
 
 ## 安裝
@@ -50,6 +51,7 @@ python -m venv .venv
 0.3.1 加入官網取消引導與人工確認封存、查票暫時斷線退避重試，以及網站拒絕原因分類；取消的最後確認仍在官網完成，詳見 [桌面版說明](docs/desktop.md)。
 0.3.2 加入共用任務狀態卡、重新啟動後的任務摘要與對應復原入口；既有訂位狀態優先，不自動恢復或重送任務。
 Windows 安裝包位於 `dist/installer/TravelDesk-Setup-0.3.2.exe`，目前交付未簽章版本。
+這是本機建置產物，不包含在 Git 原始碼中；新 clone 不會自帶 EXE。可依桌面版說明自行打包；手動 Windows CI 可產生 artifact，但不會自動發布 GitHub Release。
 舊 Tk 介面仍可用 `python -m thsr_ticket.gui` 啟動，操作見 [舊版說明](docs/gui.md)。
 
 ## 定時自動訂位
@@ -88,7 +90,9 @@ notepad booking.local.json
 若要只查票，在啟動指令加上 `--query-only`，找到符合條件的車次後會停止，不選車或訂位。
 
 OCR 分數不足或網站明確回覆驗證碼錯誤時，自動模式會等待設定間隔，重新取得首頁與驗證碼；
-每輪都計入 `max_attempts`，不另設 3 次上限。模型故障、未知網站錯誤或網路失敗仍會停止，不等待輸入。
+每輪都計入 `max_attempts`，驗證碼重試不另設 3 次上限。
+查票階段的暫時逾時、連線錯誤與 HTTP 502／503／504 會退避重試：前兩次至少等待 2、4 秒（設定間隔更長時採設定值），連續第 3 次失敗停止，也受總查詢次數限制。
+模型故障、未知網站拒絕、HTTP 403／429 仍停止；選車與最終送出訂位不套用上述網路重試。
 送出最終訂位前會建立 `booking.local.state.json`；成功時保存訂位代碼，結果不明時保留待確認紀錄。
 再次使用同一設定檔訂位會停止，請先至官網確認狀態，再自行處理紀錄，避免重複訂位。
 
@@ -103,9 +107,9 @@ OCR 分數不足或網站明確回覆驗證碼錯誤時，自動模式會等待�
 
 ## 查看與封存訂位紀錄
 
-圖形介面可在「訂位紀錄」選取訂位後按「移至歷史」，確認一次即可準備下一筆，不需手動刪檔或重打代碼。
+Qt 圖形介面可在「我的訂位」選取訂位後按「移至歷史」，確認一次即可準備下一筆，不需手動刪檔或重打代碼。
 若訂位後斷線而顯示「結果待確認」，按「處理待確認」開啟官網核對，再勾選確認並保存核對結果。
-以上只封存本機紀錄，**官網訂位仍保留**。操作說明見 [圖形介面](docs/gui.md)。
+以上只封存本機紀錄，**官網訂位仍保留**。真正取消須透過介面的官網取消引導，在官網完成取消後再回來確認封存；目前不會代送取消請求。操作說明見 [桌面介面](docs/desktop.md)。
 
 以下指令只處理本機紀錄，不連線、不讀取個資設定，也不會直接啟動訂位：
 
@@ -147,8 +151,8 @@ OCR 分數不足或網站明確回覆驗證碼錯誤時，自動模式會等待�
 - 自動模式的指定車次是篩選查詢結果，不是網站的直接車次查詢，也不會自動翻頁搜尋整天班次。
 - 尚未提供來回票、只篩早鳥、會員、護照、市話、電子郵件或付款功能；OCR 不處理其他互動式網站檢測。
 - 互動模式可在成功後選擇保存部分資料至 `thsr_ticket/.db/history.json`，預設不保存；歷史列表遮蔽證號與手機，只保留末三碼。
-- 自動模式的 `booking.local.json` 會保存你填寫的個資。設定檔與歷史資料皆為明文，並非加密。
-  `booking.local.json`、`*.state.json` 與 `.db/` 已由 Git 忽略；自訂個資檔名也需加入忽略清單。
+- 自動模式的設定檔預設保存明文個資；Qt 可選擇 Windows DPAPI 保護證號與手機，保護後需由同一 Windows 使用者解密，不適合直接跨帳號搬移。
+  此選項不會加密整份設定、訂位結果或舊 CLI 歷史。`booking.local.json`、`*.state.json`、`*.task.json`、`*.runs/` 與 `.db/` 已由 Git 忽略；自訂個資檔名也需加入忽略清單。
 
 ## 測試與驗證
 
@@ -163,13 +167,10 @@ OCR 分數不足或網站明確回覆驗證碼錯誤時，自動模式會等待�
 .\.venv\Scripts\python.exe -m flake8 -j1 --config .config/flake thsr_ticket
 ```
 
-2026-09-25 自動訂位階段：含本機瀏覽器測試 **119 項通過、1 項實站 HTTP 測試跳過**。
-後續驗證碼重試與模型評估更新：預設離線測試 **127 項通過、11 項跳過**（10 項瀏覽器、1 項實站），Flake8 通過。
-最新結果保存與執行紀錄更新：預設離線測試 **136 項通過、11 項跳過**，Flake8 通過。
-訂位紀錄管理更新：預設離線測試 **148 項通過、11 項跳過**，Flake8 通過。
-2026-09-26 圖形介面更新：預設離線測試 **157 項通過、11 項跳過**，Flake8 通過；本機隱藏 Tk 視窗的載入、驗證及儲存操作測試通過。
+0.3.2 最近一次本機驗證：**226 項通過、11 項跳過**（10 項選用瀏覽器、1 項實站測試），Flake8 通過；詳細日期、打包結果及歷史數字見 [專案驗證](docs/verification.md)。這是既有驗證紀錄，不代表每次文件修改都重新執行產品測試。
 測試涵蓋定時等待、次秒間隔、車次篩選、無票重查、成功停止與訂位結果不明時不重送。
 人工 HTML 與本機模擬不能取代實站驗證；Mypy、Pylint 與 CI 尚有待整理項目。
+一般 push 的 Linux CI 只安裝基礎依賴，不能代表 Qt 桌面驗收；Windows 桌面打包驗證是另一個手動 workflow，遠端執行結果需另行確認。
 
 若需單獨測試 HTTP 首頁讀取，可執行下列指令；只讀取頁面與驗證碼，不送出訂位：
 
@@ -178,6 +179,28 @@ OCR 分數不足或網站明確回覆驗證碼錯誤時，自動模式會等待�
 ```
 
 詳細紀錄：[專案驗證](docs/verification.md)、[瀏覽器與 OCR](docs/browser-ocr.md)。
+
+## 功能對應程式碼
+
+以下是找程式的起點；**每個 Python、QML、PowerShell、建置檔與測試檔的個別用途**均列於 [逐檔索引](docs/file-inventory.md#保留檔案逐項索引)。
+
+| 要理解或修改的功能 | 主要程式碼 |
+| --- | --- |
+| 桌面啟動與資源載入 | [desktop/__main__.py](thsr_ticket/desktop/__main__.py) |
+| 頁面、按鈕、欄位與對話框 | [Main.qml](thsr_ticket/desktop/qml/Main.qml)、[Field.qml](thsr_ticket/desktop/qml/Field.qml) 與同目錄共用元件 |
+| 介面事件、設定切換、背景任務 | [desktop/controller.py](thsr_ticket/desktop/controller.py)、[application.py](thsr_ticket/application.py) |
+| 設定驗證、排程、查票、重試與訂位 | [automation.py](thsr_ticket/automation.py) |
+| 任務摘要、狀態與復原入口 | [task_status.py](thsr_ticket/task_status.py)、[TaskPanel.qml](thsr_ticket/desktop/qml/TaskPanel.qml) |
+| 紀錄封存、待確認與人工取消確認 | [booking_records.py](thsr_ticket/booking_records.py) |
+| 防止同一設定同時操作、保存結果 | [record_lock.py](thsr_ticket/record_lock.py)、[run_records.py](thsr_ticket/run_records.py) |
+| 設定保存、個資保護、最近檔案 | [config_store.py](thsr_ticket/config_store.py)、[preferences.py](thsr_ticket/desktop/preferences.py) |
+| 瀏覽器與 HTTP 傳輸 | [browser_request.py](thsr_ticket/remote/browser_request.py)、[native_browser.py](thsr_ticket/remote/native_browser.py)、[http_request.py](thsr_ticket/remote/http_request.py) |
+| 網頁車次、訂位結果與錯誤解析 | [avail_trains.py](thsr_ticket/view_model/avail_trains.py)、[booking_result.py](thsr_ticket/view_model/booking_result.py)、[error_feedback.py](thsr_ticket/view_model/error_feedback.py) |
+| OCR 與離線準確率評估 | [captcha.py](thsr_ticket/captcha.py)、[ocr_benchmark.py](thsr_ticket/ocr_benchmark.py) |
+| CLI／舊 Tk 入口 | [main.py](thsr_ticket/main.py)、[gui.py](thsr_ticket/gui.py) |
+| 版本檢查、EXE 與安裝包 | [updates.py](thsr_ticket/desktop/updates.py)、[TravelDesk.spec](TravelDesk.spec)、[TravelDesk.iss](installer/TravelDesk.iss) |
+
+建議下一步先補齊 Windows 桌面回歸與發行驗收，再處理多視窗任務協調、診斷匯出及資料遷移；完整排序與完成條件見 [優化計畫](docs/roadmap.md)。
 
 ## 專案來源
 
