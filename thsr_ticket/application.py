@@ -55,19 +55,6 @@ def form_config(values):
     return AutomationConfig(**data)
 
 
-class QueueWriter:
-    def __init__(self, messages):
-        self.messages = messages
-
-    def write(self, text):
-        if text:
-            self.messages.put(('text', text))
-        return len(text)
-
-    def flush(self):
-        pass
-
-
 class StoppableClient:
     def __init__(self, client, stop):
         self.client, self.stop = client, stop
