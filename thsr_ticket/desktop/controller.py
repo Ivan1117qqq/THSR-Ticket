@@ -4,18 +4,22 @@ import json
 import queue
 import threading
 import importlib.util
+import os
 from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtCore import QObject, Property, QTimer, Signal, Slot, QUrl
 from PySide6.QtGui import QDesktopServices
-from PySide6.QtWidgets import QFileDialog
+from PySide6.QtWidgets import QFileDialog, QApplication
 from pydantic import ValidationError
 
-from thsr_ticket.application import STATIONS, FIELDS, form_config, protected_config_path, run_background
+from thsr_ticket.application import STATIONS, FIELDS, FieldError, form_config, protected_config_path, run_background
 from thsr_ticket.automation import TAIPEI
 from thsr_ticket.booking_records import record_entries, record_paths, archive_booking, resolve_pending
-from thsr_ticket.run_records import atomic_json
+from thsr_ticket.config_store import read_config_data, write_config_data, is_protected
+from thsr_ticket.desktop.preferences import Preferences
+from thsr_ticket.desktop.updates import check_release, RELEASES
+from thsr_ticket.version import VERSION
 
 
 def defaults():
@@ -57,13 +61,21 @@ class DesktopController(QObject):
     formChanged = Signal()
     closeReady = Signal()
     resetSecrets = Signal()
+    confirmRequested = Signal(str)
 
     def __init__(self, data_dir, worker=run_background):
         super().__init__()
         self.data_dir = Path(data_dir)
         self.path = self.data_dir / 'booking.local.json'
+        self.preferences = Preferences(self.data_dir)
+        previous = self.preferences.read().get('last_config')
+        if isinstance(previous, str) and Path(previous).is_absolute():
+            self.path = Path(previous)
         self.worker = worker
         self._form = defaults()
+        self._saved_form = dict(self._form)
+        self._protect_private = os.name == 'nt'
+        self._saved_protection = self._protect_private
         self._records = []
         self._status = '設定行程，開始下一段旅程。'
         self._phase = '尚未開始'
@@ -75,6 +87,10 @@ class DesktopController(QObject):
         self._issues = {}
         self._match = {}
         self._countdown = ''
+        self._recovery = ''
+        self._update_checking = False
+        self._update_message = '手動檢查正式版本，不會自動下載或覆蓋程式。'
+        self._update_available = False
         self._closing = False
         self._thread = None
         self._received_done = False
@@ -85,6 +101,46 @@ class DesktopController(QObject):
         self.timer.start(100)
         if self.path.exists():
             self.load_path(self.path)
+        elif previous:
+            self.notify('上次使用的設定已移動或不存在，請重新載入；不會自動建立另一份設定。', True)
+
+    @Property(bool, notify=formChanged)
+    def dirty(self):
+        return self._form != self._saved_form or self._protect_private != self._saved_protection
+
+    @Property(bool, notify=formChanged)
+    def protectPrivate(self):
+        return self._protect_private
+
+    @Property(bool, constant=True)
+    def protectionAvailable(self):
+        return os.name == 'nt'
+
+    @Slot(bool)
+    def setProtection(self, enabled):
+        if not self._running and (not enabled or self.protectionAvailable):
+            self._protect_private = enabled
+            self.formChanged.emit()
+
+    @Property(str, notify=changed)
+    def recovery(self):
+        return self._recovery
+
+    @Property(str, constant=True)
+    def version(self):
+        return VERSION
+
+    @Property(bool, notify=changed)
+    def updateChecking(self):
+        return self._update_checking
+
+    @Property(bool, notify=changed)
+    def updateAvailable(self):
+        return self._update_available
+
+    @Property(str, notify=changed)
+    def updateMessage(self):
+        return self._update_message
 
     @Property('QVariantMap', notify=formChanged)
     def form(self):
@@ -178,14 +234,20 @@ class DesktopController(QObject):
         if self._running:
             return False
         try:
-            new = form_values(json.loads(Path(path).read_text(encoding='utf-8-sig')))
+            raw = json.loads(Path(path).read_text(encoding='utf-8-sig'))
+            new = form_values(read_config_data(path))
             # Keep the original location: its state/runs guard must follow the setting.
             self.path = Path(path).resolve()
             self._form = new
+            self._saved_form = dict(new)
+            self._protect_private = is_protected(raw)
+            self._saved_protection = self._protect_private
+            self._issues = {}
             self.resetSecrets.emit()
             self.formChanged.emit()
             self.refresh()
             self.notify('已載入設定，請核對日期與時間。')
+            self.remember()
             return True
         except (ValueError, OSError, TypeError):
             self.notify('無法載入；請選擇有效的訂票設定 JSON。', True)
@@ -195,24 +257,48 @@ class DesktopController(QObject):
     def load(self):
         if self._running:
             return
+        if self.dirty:
+            self.confirmRequested.emit('load')
+            return
+        self.choose_load()
+
+    def choose_load(self):
         path, _ = QFileDialog.getOpenFileName(None, '載入設定', str(self.path.parent), 'JSON (*.json)')
         if path:
             self.load_path(path)
+
+    def remember(self):
+        try:
+            self.preferences.remember(self.path)
+        except OSError:
+            self.notify('設定可使用，但無法記住檔案位置；下次需手動載入。', True)
 
     def save_config(self):
         self._issues = {}
         try:
             config = form_config({key: value.strip() for key, value in self._form.items()})
+        except FieldError as exc:
+            self._issues[exc.field] = str(exc)
+            self.changed.emit()
+            raise
         except ValidationError as exc:
             for error in exc.errors():
-                key = str(error['loc'][0])
-                self._issues[key] = '請檢查格式與範圍。'
+                key = next((str(part) for part in reversed(error['loc']) if str(part) in self._form), '__root__')
+                details = {'interval_seconds': '請輸入大於 0 的秒數。', 'max_attempts': '請輸入 1～10000。',
+                           'personal_id': '請檢查身分證或證件號碼格式。', 'outbound_date': '請輸入有效搭車日期。',
+                           'earliest_departure': '請使用 00:00～23:59。', 'latest_departure': '請使用 00:00～23:59。',
+                           '__root__': '請檢查起訖站不同、票數合計 1～10，以及日期與時間先後順序。'}
+                self._issues[key] = details.get(key, '請檢查格式與範圍。')
             self.changed.emit()
             raise
         if protected_config_path(self.path):
             raise ValueError('範本不能直接儲存，請先在設定頁另存個人設定。')
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        atomic_json(self.path, json.loads(config.json()))
+        write_config_data(self.path, json.loads(config.json()), protect=self._protect_private)
+        self._saved_form = dict(self._form)
+        self._saved_protection = self._protect_private
+        self.formChanged.emit()
+        self.remember()
         return config
 
     @Slot()
@@ -261,6 +347,7 @@ class DesktopController(QObject):
             self.notify('請檢查日期、時段、票數、身分證及儲存位置，再啟動。', True)
             return
         self._stop.clear()
+        self._recovery = ''
         self._received_done = False
         self._running, self._attempt, self._log = True, 0, ''
         self._match = {}
@@ -281,8 +368,29 @@ class DesktopController(QObject):
         if self._running:
             self._closing = True
             self.stop()
+        elif self.dirty:
+            self.confirmRequested.emit('close')
         else:
             self.closeReady.emit()
+
+    @Slot(str, str)
+    def confirmAction(self, action, decision):
+        if self._running or action not in ('close', 'load') or decision not in ('save', 'discard'):
+            return
+        if decision == 'save':
+            try:
+                self.save_config()
+            except (ValueError, OSError):
+                self.notify('尚未儲存，請修正設定後再繼續。', True)
+                return
+        if action == 'close':
+            self.closeReady.emit()
+        else:
+            self.choose_load()
+
+    @Slot()
+    def recover(self):
+        self.navigate({'records': 3, 'settings': 4, 'edit': 1}.get(self._recovery, 1))
 
     @Slot()
     def poll(self):
@@ -305,8 +413,15 @@ class DesktopController(QObject):
             elif kind == 'done':
                 self._received_done = True
                 self._phase = value
-                self.notify(value)
+                self.notify(value, self._error)
                 self.refresh()
+            elif kind == 'completion':
+                self._error = value['code'] not in ('success', 'stopped')
+                self._recovery = value['action']
+            elif kind == 'update':
+                self._update_checking = False
+                self._update_message = value['message']
+                self._update_available = value['available']
         # Join before another task can start, including the short gap after its done event.
         if self._thread is not None and not self._thread.is_alive():
             dirty = True
@@ -364,6 +479,12 @@ class DesktopController(QObject):
     def official(self):
         QDesktopServices.openUrl(QUrl('https://irs.thsrc.com.tw/IMINT/'))
 
+    @Slot(str)
+    def copyCode(self, code):
+        if code and any(entry.get('code') == code for entry in self._records):
+            QApplication.clipboard().setText(code)
+            self.notify('訂位代碼已複製。')
+
     @Slot()
     def folder(self):
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.path.parent)))
@@ -378,3 +499,23 @@ class DesktopController(QObject):
             chrome = '未找到 Chrome，請先安裝'
         dependencies = all(importlib.util.find_spec(name) for name in ('playwright', 'ddddocr', 'onnxruntime'))
         self.notify(chrome + ('；自動化套件已安裝。' if dependencies else '；缺少自動化套件，請安裝桌面依賴。'))
+
+    @Slot()
+    def checkUpdates(self):
+        if self._running or self._update_checking:
+            return
+        self._update_checking = True
+        self._update_message = '正在檢查 GitHub 正式版本…'
+        self.changed.emit()
+
+        def check():
+            try:
+                result = check_release(VERSION)
+            except Exception:
+                result = {'message': '無法檢查更新，現有版本仍可使用。稍後可再試。', 'available': False}
+            self._messages.put(('update', result))
+        threading.Thread(target=check, daemon=True).start()
+
+    @Slot()
+    def releasePage(self):
+        QDesktopServices.openUrl(QUrl(RELEASES))

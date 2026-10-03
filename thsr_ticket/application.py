@@ -1,6 +1,6 @@
 """UI-independent form conversion and cooperative booking worker."""
-from contextlib import redirect_stdout
 from pathlib import Path
+from requests import RequestException
 from thsr_ticket.automation import AutomationConfig, AutomationRunner, wait_until
 
 
@@ -20,6 +20,12 @@ INTEGER_FIELDS = ('adult_tickets', 'child_tickets', 'disabled_tickets', 'elder_t
                   'college_tickets', 'max_attempts')
 
 
+class FieldError(ValueError):
+    def __init__(self, field, message):
+        self.field = field
+        super().__init__(message)
+
+
 def protected_config_path(path):
     name = Path(path).name.casefold()
     return name.endswith(('.state.json', '.example.json')) or name in ('state.json', 'result.json')
@@ -31,16 +37,21 @@ def form_config(values):
         try:
             data[name] = int(data[name])
         except ValueError:
-            raise ValueError(f'{dict(FIELDS)[name]}必須是整數。') from None
-    data['start_station'] = STATIONS.index(data['start_station']) + 1
-    data['dest_station'] = STATIONS.index(data['dest_station']) + 1
-    data['class_type'] = ['標準', '商務'].index(data['class_type'])
+            raise FieldError(name, '請輸入整數。') from None
+    for key, options in [('start_station', STATIONS), ('dest_station', STATIONS), ('class_type', ['標準', '商務'])]:
+        try:
+            data[key] = options.index(data[key]) + (0 if key == 'class_type' else 1)
+        except ValueError:
+            raise FieldError(key, '請從選單選擇。') from None
     try:
         data['interval_seconds'] = float(data['interval_seconds'])
+    except ValueError:
+        raise FieldError('interval_seconds', '請輸入大於 0 的秒數。') from None
+    try:
         data['train_ids'] = [int(item.strip()) for item in data['train_ids'].replace('，', ',').split(',')
                              if item.strip()]
     except ValueError:
-        raise ValueError('間隔必須是數字，車次必須是以逗號分隔的整數。') from None
+        raise FieldError('train_ids', '請輸入逗號分隔的整數車次。') from None
     return AutomationConfig(**data)
 
 
@@ -80,57 +91,76 @@ def run_background(config, path, query_only, stop, messages, client_factory=None
             raise KeyboardInterrupt()
 
     client = None
+    runner = None
+    failure = ''
+
+    def emit(text):
+        messages.put(('text', str(text) + '\n'))
+
     phase = 'preflight'
     outcome = '執行結束'
-    with redirect_stdout(QueueWriter(messages)):
-        try:
-            if stop.is_set():
-                raise KeyboardInterrupt()
-            state = path.resolve().with_suffix('.state.json')
-            if not query_only and state.exists():
-                raise RuntimeError('已有訂位送出紀錄，請先查看並確認原訂位。')
-            if client_factory is None:
-                from thsr_ticket.remote.browser_request import BrowserRequest
-                client_factory = BrowserRequest
-            if reader_factory is None:
-                from thsr_ticket.captcha import CaptchaReader
-                reader_factory = CaptchaReader
-            phase = 'browser_start'
-            messages.put(('phase', '正在啟動瀏覽器'))
-            client = client_factory(channel='chrome', interactive=False)
-            phase = 'ocr_load'
-            messages.put(('phase', '正在準備辨識模型'))
-            reader = reader_factory(model=config.ocr_model)
-            if not reader.prepare():
-                raise RuntimeError('OCR 無法載入，請確認已安裝自動化套件。')
-            print(f'等待台灣時間 {config.start_at.isoformat()}；可按停止取消。')
-            phase = 'schedule'
-            messages.put(('phase', '等待啟動時間：' + config.start_at.strftime('%m/%d %H:%M')))
-            wait_until(config.start_at, sleep=sleep)
-            if stop.is_set():
-                raise KeyboardInterrupt()
-            runner = (runner_factory or AutomationRunner)(
-                config, StoppableClient(client, stop), reader, state, sleep=sleep,
-                event_sink=lambda event: messages.put(('event', event)))
-            phase = 'query'
-            success = runner.run(query_only)
-            outcome = ('找到符合車次' if query_only else '訂位成功，尚未付款') if success else '已達查詢上限'
-        except KeyboardInterrupt:
-            outcome = '已停止；若已嘗試送出訂位，請確認官網狀態'
-        except Exception as exc:
-            # Do not echo arbitrary exceptions or website content into the UI log.
-            outcome = '執行失敗，請查看執行紀錄；若已送出訂位，先確認官網狀態'
-            print(f'錯誤類型：{type(exc).__name__}')
-            hints = {'preflight': '請先確認是否已有訂位紀錄。',
-                     'browser_start': 'Chrome 無法啟動，請確認已安裝 Chrome 及自動化套件。',
-                     'ocr_load': 'OCR 無法載入，請依 README 安裝 requirements-automation-lock.txt。'}
-            if phase in hints:
-                outcome = hints[phase]
-        finally:
-            if client is not None:
-                try:
-                    client.close()
-                except Exception:
-                    print('瀏覽器清理失敗，請檢查程式開啟的獨立視窗。')
-            print(outcome)
-            messages.put(('done', outcome))
+    try:
+        if stop.is_set():
+            raise KeyboardInterrupt()
+        state = path.resolve().with_suffix('.state.json')
+        if not query_only and state.exists():
+            raise RuntimeError('已有訂位送出紀錄，請先查看並確認原訂位。')
+        if client_factory is None:
+            from thsr_ticket.remote.browser_request import BrowserRequest
+            client_factory = BrowserRequest
+        if reader_factory is None:
+            from thsr_ticket.captcha import CaptchaReader
+            reader_factory = CaptchaReader
+        phase = 'browser_start'
+        messages.put(('phase', '正在啟動瀏覽器'))
+        client = client_factory(channel='chrome', interactive=False)
+        phase = 'ocr_load'
+        messages.put(('phase', '正在準備辨識模型'))
+        reader = reader_factory(model=config.ocr_model)
+        if not reader.prepare():
+            raise RuntimeError('OCR 無法載入，請確認已安裝自動化套件。')
+        emit(f'等待台灣時間 {config.start_at.isoformat()}；可按停止取消。')
+        phase = 'schedule'
+        messages.put(('phase', '等待啟動時間：' + config.start_at.strftime('%m/%d %H:%M')))
+        wait_until(config.start_at, sleep=sleep)
+        if stop.is_set():
+            raise KeyboardInterrupt()
+        runner = (runner_factory or AutomationRunner)(
+            config, StoppableClient(client, stop), reader, state, sleep=sleep,
+            event_sink=lambda event: messages.put(('event', event)), output=emit)
+        phase = 'query'
+        success = runner.run(query_only)
+        outcome = ('找到符合車次' if query_only else '訂位成功，尚未付款') if success else '已達查詢上限'
+    except KeyboardInterrupt:
+        failure = 'stopped'
+        outcome = '已停止；若已嘗試送出訂位，請確認官網狀態'
+    except Exception as exc:
+        # Do not echo arbitrary exceptions or website content into the UI log.
+        outcome = '執行失敗，請查看執行紀錄；若已送出訂位，先確認官網狀態'
+        failure = 'operation_failed'
+        emit(f'錯誤類型：{type(exc).__name__}')
+        hints = {'preflight': '請先確認是否已有訂位紀錄。',
+                 'browser_start': 'Chrome 無法啟動，請確認已安裝 Chrome 及自動化套件。',
+                 'ocr_load': 'OCR 無法載入，請依 README 安裝 requirements-automation-lock.txt。'}
+        if phase in hints:
+            outcome = hints[phase]
+            failure = phase
+        elif isinstance(exc, RequestException):
+            failure = 'network'
+            outcome = '網路連線失敗，請檢查連線後再手動啟動。'
+    finally:
+        state = path.resolve().with_suffix('.state.json')
+        if failure and state.exists():
+            failure = 'booking_unconfirmed'
+            outcome = '已有訂位送出紀錄，請到「我的訂位」核對結果；不會自動重送。'
+        if client is not None:
+            try:
+                client.close()
+            except Exception:
+                emit('瀏覽器清理失敗，請檢查程式開啟的獨立視窗。')
+        emit(outcome)
+        messages.put(('completion', {'code': failure or 'success', 'message': outcome,
+                                     'action': 'records' if failure == 'booking_unconfirmed' else
+                                     'settings' if failure in ('browser_start', 'ocr_load') else
+                                     'edit' if failure else ''}))
+        messages.put(('done', outcome))

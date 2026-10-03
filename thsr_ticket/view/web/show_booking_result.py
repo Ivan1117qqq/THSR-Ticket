@@ -5,7 +5,8 @@ from thsr_ticket.view_model.booking_result import Ticket
 
 
 class ShowBookingResult(AbstractShow):
-    def show(self, tickets: List[Ticket], select: bool = False) -> int:
+    def show(self, tickets: List[Ticket], select: bool = False, output=print) -> int:
+        print = output
         ticket = tickets[0]
         print("\n\n----------- 訂位結果 -----------")
         print("訂位代號: "+ticket.id)

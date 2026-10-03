@@ -24,6 +24,7 @@ from thsr_ticket.view_model.error_feedback import ErrorFeedback
 from thsr_ticket.view.web.show_booking_result import ShowBookingResult
 from thsr_ticket.run_records import RunRecords, atomic_json
 from thsr_ticket.record_lock import record_lock
+from thsr_ticket.config_store import read_config_data
 
 
 TAIPEI = timezone(timedelta(hours=8))
@@ -114,7 +115,7 @@ class AutomationConfig(BaseModel):
 
     @classmethod
     def load(cls, path):
-        return cls.parse_obj(json.loads(Path(path).read_text(encoding='utf-8-sig')))
+        return cls.parse_obj(read_config_data(path))
 
     def select(self, trains):
         candidates = [train for train in trains
@@ -162,7 +163,7 @@ def captcha_rejected(response):
 
 
 class AutomationRunner:
-    def __init__(self, config, client, reader, state_path, sleep=time.sleep, event_sink=None):
+    def __init__(self, config, client, reader, state_path, sleep=time.sleep, event_sink=None, output=print):
         self.config, self.client, self.reader = config, client, reader
         self.state_path = Path(state_path)
         self.sleep = sleep
@@ -170,6 +171,7 @@ class AutomationRunner:
         self.attempt = 0
         self.phase = 'starting'
         self.event_sink = event_sink
+        self.output = output
 
     @contextmanager
     def measure(self, phase):
@@ -192,13 +194,13 @@ class AutomationRunner:
                            elapsed_ms=round((time.perf_counter() - self.attempt_started) * 1000, 3))
 
     def run(self, query_only=False):
-        self.records = RunRecords(self.state_path, event_sink=self.event_sink)
+        self.records = RunRecords(self.state_path, event_sink=self.event_sink, output=self.output)
         self.attempt = 0
         self.phase = 'starting'
         started = time.perf_counter()
         self.records.event('run_started', query_only=query_only, ocr_model=self.config.ocr_model,
                            max_attempts=self.config.max_attempts, interval_seconds=self.config.interval_seconds)
-        print(f'執行紀錄：{self.records.events_path}')
+        self.output(f'執行紀錄：{self.records.events_path}')
         try:
             with record_lock(self.state_path):
                 result = self._run(query_only)
@@ -238,7 +240,7 @@ class AutomationRunner:
             self.attempt = attempt
             self.attempt_finished = False
             self.attempt_started = time.perf_counter()
-            print(f'第 {attempt}/{self.config.max_attempts} 次查詢。')
+            self.output(f'第 {attempt}/{self.config.max_attempts} 次查詢。')
             with self.measure('homepage'):
                 first = self.client.request_booking_page()
             check_errors(first)
@@ -272,28 +274,28 @@ class AutomationRunner:
                     raise RuntimeError('查詢未回傳車次表單，已停止；請確認網站狀態。')
                 selected = self.config.select(AvailTrains().parse(reply.content))
             if selected is not None:
-                print(f'符合條件：{selected.id:04d}，{selected.depart} → {selected.arrive}')
+                self.output(f'符合條件：{selected.id:04d}，{selected.depart} → {selected.arrive}')
                 self.records.event('train_selected', train_id=f'{selected.id:04d}',
                                    depart=selected.depart, arrive=selected.arrive)
                 if query_only:
                     self.finish_attempt('query_match')
-                    print('僅查詢模式結束，未送出訂位。')
+                    self.output('僅查詢模式結束，未送出訂位。')
                     return True
                 self.book(selected)
                 self.finish_attempt('booked')
                 return True
             self.retry(attempt, '沒有符合條件的車次', 'no_matching_train')
-        print('已達查詢次數上限，未送出訂位。')
+        self.output('已達查詢次數上限，未送出訂位。')
         return False
 
     def retry(self, attempt, reason, outcome):
         self.finish_attempt(outcome)
         self.phase = 'retry_wait'
         if attempt < self.config.max_attempts:
-            print(f'{reason}，{self.config.interval_seconds:g} 秒後重新取得首頁與驗證碼。')
+            self.output(f'{reason}，{self.config.interval_seconds:g} 秒後重新取得首頁與驗證碼。')
             self.sleep(self.config.interval_seconds)
         else:
-            print(f'{reason}，不再重試。')
+            self.output(f'{reason}，不再重試。')
 
     def book(self, selected):
         train = ConfirmTrainModel(selected_train=selected.form_value)
@@ -320,17 +322,17 @@ class AutomationRunner:
                 raise ValueError('缺少訂位代碼。')
         except Exception as exc:
             raise RuntimeError('訂位已嘗試送出，結果尚未確認；請至官網確認，勿直接重跑。') from exc
-        ShowBookingResult().show(tickets)
-        print('訂位成功，已停止；尚未付款。')
+        ShowBookingResult().show(tickets, output=self.output)
+        self.output('訂位成功，已停止；尚未付款。')
         self.phase = 'save_result'
         try:
             self.records.save_result(tickets, self.config.outbound_date)
-            print(f'完整訂位結果：{self.records.result_path}')
+            self.output(f'完整訂位結果：{self.records.result_path}')
         except OSError:
             self.records.event('result_save_failed')
-            print('訂位已成功，但完整結果無法存檔，請保留上方終端結果；勿重新訂位。')
+            self.output('訂位已成功，但完整結果無法存檔，請保留上方終端結果；勿重新訂位。')
         try:
             atomic_json(self.state_path, {'status': 'booked', 'booking_codes': [ticket.id for ticket in tickets]})
         except OSError:
             self.records.event('state_update_failed')
-            print('訂位已成功，但狀態檔更新失敗；原防重送紀錄仍保留，請先確認訂位。')
+            self.output('訂位已成功，但狀態檔更新失敗；原防重送紀錄仍保留，請先確認訂位。')

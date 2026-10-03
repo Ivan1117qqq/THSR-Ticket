@@ -103,6 +103,58 @@ def test_invalid_input_does_not_launch_worker(controller):
     assert not controller.path.exists()
 
 
+def test_remembers_external_path_and_guard(controller, tmp_path):
+    path = tmp_path / 'external.json'
+    path.write_text(form_config(values()).json(), encoding='utf-8')
+    path.with_suffix('.state.json').write_text('{"status":"submission_pending"}')
+    assert controller.load_path(path)
+    restored = DesktopController(controller.data_dir, worker=Mock())
+    try:
+        assert restored.path == path
+        restored.start(False)
+        restored.worker.assert_not_called()
+        assert restored.page == 3
+    finally:
+        restored.timer.stop()
+
+
+def test_unsaved_close_requires_explicit_choice(controller):
+    ready, question = Mock(), Mock()
+    controller.closeReady.connect(ready)
+    controller.confirmRequested.connect(question)
+    controller.setField('phone_num', '0912345678')
+    controller.requestClose()
+    question.assert_called_once_with('close')
+    ready.assert_not_called()
+    controller.confirmAction('close', 'cancel')
+    ready.assert_not_called()
+    controller.confirmAction('close', 'save')
+    assert not controller.dirty
+    ready.assert_called_once()
+
+
+def test_corrupt_preferences_do_not_break_startup(qt, tmp_path):
+    (tmp_path / 'preferences.json').write_text('broken')
+    desktop = DesktopController(tmp_path)
+    assert desktop.path == tmp_path / 'booking.local.json'
+    desktop.timer.stop()
+
+
+def test_completion_error_preserves_recovery(controller):
+    controller._messages.put(('completion', {'code': 'booking_unconfirmed', 'action': 'records'}))
+    controller._messages.put(('done', 'needs verification'))
+    controller.poll()
+    assert controller.error and controller.recovery == 'records'
+    controller.recover()
+    assert controller.page == 3
+
+
+def test_integer_errors_are_attached_to_field(controller):
+    controller.setField('adult_tickets', '1.5')
+    controller.save()
+    assert controller.error and 'adult_tickets' in controller.issues
+
+
 def test_template_requires_save_as(controller, tmp_path):
     path = tmp_path / 'booking.example.json'
     path.write_text(form_config(values()).json(), encoding='utf-8')

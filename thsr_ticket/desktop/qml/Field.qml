@@ -13,6 +13,7 @@ ColumnLayout {
     property bool reveal: false
     property bool calendar: false
     property bool numeric: false
+    property bool timePicker: ['start_at', 'earliest_departure', 'latest_departure'].indexOf(fieldKey) >= 0
     spacing: 8
     Layout.fillWidth: true
     enabled: !backend.running
@@ -91,6 +92,14 @@ ColumnLayout {
                 picker.year = d.getFullYear(); picker.month = d.getMonth(); picker.open()
             }
         }
+        AppButton {
+            visible:field.timePicker; text:'時間'; horizontalPadding:12
+            onClicked:{
+                let parts = (field.fieldKey === 'start_at' ? input.text.slice(11) : input.text).split(':')
+                hours.value=Number(parts[0]) || 0; minutes.value=Number(parts[1]) || 0; seconds.value=Number(parts[2]) || 0
+                timeDialog.open()
+            }
+        }
         ColumnLayout {
             visible: field.numeric
             spacing: 0
@@ -109,6 +118,28 @@ ColumnLayout {
         visible: !!field.backend.issues[field.fieldKey]
         text: field.backend.issues[field.fieldKey] || ''
         color: '#b65539'; font.pixelSize: 12
+    }
+    Popup {
+        id:timeDialog; parent:Overlay.overlay; anchors.centerIn:parent; modal:true; width:390; height:225; padding:22
+        background:Rectangle {color:'white'; radius:16; border.color:'#dce3ec'}
+        ColumnLayout {
+            anchors.fill:parent; spacing:18
+            Text {text:'選擇時間'; font.pixelSize:18; color:'#20334b'}
+            RowLayout {
+                SpinBox {id:hours; from:0; to:23; editable:true; Layout.fillWidth:true; Accessible.name:'小時'}
+                Text {text:':'}
+                SpinBox {id:minutes; from:0; to:59; editable:true; Layout.fillWidth:true; Accessible.name:'分鐘'}
+                SpinBox {id:seconds; visible:field.fieldKey === 'start_at'; from:0; to:59; editable:true; Layout.fillWidth:true; Accessible.name:'秒'}
+            }
+            AppButton {
+                text:'套用時間'; primary:true; Layout.alignment:Qt.AlignRight
+                onClicked:{
+                    let t=String(hours.value).padStart(2,'0')+':'+String(minutes.value).padStart(2,'0')
+                    if(field.fieldKey === 'start_at') t=input.text.slice(0,10)+' '+t+':'+String(seconds.value).padStart(2,'0')
+                    field.backend.setField(field.fieldKey,t); timeDialog.close()
+                }
+            }
+        }
     }
     Popup {
         id: picker

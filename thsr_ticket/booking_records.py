@@ -198,8 +198,11 @@ def record_entries(config_path):
             if resolution.exists():
                 resolved = read_object(resolution)
                 code = resolved.get('booking_code', '')
-                entries.append({'status': 'resolved', 'code': code, 'current': False, 'ticket': {},
-                                'resolution': resolved.get('outcome', '')})
+                entries.append({'status': 'resolved', 'code': code, 'current': False,
+                                'ticket': {'date': str(data.get('outbound_date', '')),
+                                           'train_id': str(data.get('train_id', ''))},
+                                'resolution': resolved.get('outcome', ''),
+                                'confirmed_at': resolved.get('confirmed_at', '')})
             else:
                 for code in codes:
                     if not any(item['code'] == code for item in entries):

@@ -15,8 +15,19 @@ ApplicationWindow {
     property var pageTitles: ['旅程總覽', '安排新行程', '任務進度', '我的訂位', '偏好與資料']
     property var selected: null
     property bool allowClose: false
+    property string pendingAction: ''
+    property var filteredRecords: backend.records.filter(function(r){
+        return (history.checked || r.current) &&
+            (recordStatus.currentIndex === 0 || r.status === ['','booked','submission_pending','resolved','history'][recordStatus.currentIndex]) &&
+            (!recordDate.text || String(r.ticket.date || '').indexOf(recordDate.text.trim()) >= 0) &&
+            (!recordSearch.text || (r.code+' '+JSON.stringify(r.ticket)).toLowerCase().indexOf(recordSearch.text.trim().toLowerCase()) >= 0)
+    })
     onClosing: function(close) { close.accepted = allowClose; if (!allowClose) backend.requestClose() }
-    Connections { target: backend; function onCloseReady() { window.allowClose = true; window.close() } }
+    Connections {
+        target: backend
+        function onCloseReady() { window.allowClose = true; window.close() }
+        function onConfirmRequested(action) { window.pendingAction = action; unsavedDialog.open() }
+    }
 
     component Caption: Text { color: '#7e8ca0'; font.pixelSize: 13; wrapMode: Text.WordWrap; Layout.fillWidth: true }
     component Heading: Text { color: '#20334b'; font.pixelSize: 26; font.bold: true }
@@ -63,7 +74,7 @@ ApplicationWindow {
                 Item { Layout.fillHeight: true }
                 Rectangle { Layout.fillWidth: true; height: 1; color: '#294251' }
                 Text { text: backend.running ? '●  任務執行中' : '●  準備就緒'; color: '#94cdb8'; font.pixelSize: 12; Layout.topMargin: 14 }
-                Text { text: 'DESKTOP  /  0.2.0'; color: '#648093'; font.pixelSize: 10; Layout.bottomMargin: 8 }
+                Text { text: 'DESKTOP  /  ' + backend.version; color: '#648093'; font.pixelSize: 10; Layout.bottomMargin: 8 }
             }
         }
         ColumnLayout {
@@ -75,7 +86,7 @@ ApplicationWindow {
                     ColumnLayout {
                         spacing: 5
                         Text { text: 'WORKSPACE  /  ' + String(backend.page + 1).padStart(2,'0'); color: '#8a98aa'; font.pixelSize: 10; font.letterSpacing: 1.5 }
-                        Text { text: window.pageTitles[backend.page]; color: '#20334b'; font.pixelSize: 23; font.bold: true }
+                        Text { text: window.pageTitles[backend.page] + (backend.dirty ? ' · 未儲存' : ''); color: '#20334b'; font.pixelSize: 23; font.bold: true }
                     }
                     Item { Layout.fillWidth: true }
                     AppButton { text: '載入設定'; quiet: true; enabled: !backend.running; onClicked: backend.load() }
@@ -132,6 +143,7 @@ ApplicationWindow {
                     ColumnLayout {
                         width:editor.availableWidth; spacing:18
                         Item { height:6 }
+                        Caption {visible:!!backend.issues.__root__; text:backend.issues.__root__ || ''; color:'#b65539'; Layout.leftMargin:28; Layout.rightMargin:28}
                         Card {
                             Layout.fillWidth:true; Layout.leftMargin:28; Layout.rightMargin:28
                             title:'01  行程與時段'; subtitle:'先選擇目的地，再安排出發時間。'
@@ -233,14 +245,20 @@ ApplicationWindow {
                             AppButton {text:'重新整理'; quiet:true; onClicked:backend.refresh()}
                             AppButton {text:'開啟高鐵官網'; onClicked:backend.official()}
                         }
+                        RowLayout {
+                            Layout.fillWidth:true; Layout.leftMargin:28; Layout.rightMargin:28
+                            TextField {id:recordSearch; placeholderText:'搜尋代碼、車次或車站'; Layout.fillWidth:true; implicitHeight:42; selectByMouse:true}
+                            TextField {id:recordDate; placeholderText:'日期包含，例如 09/30'; Layout.preferredWidth:190; implicitHeight:42}
+                            ComboBox {id:recordStatus; model:['全部狀態','已訂位','待確認','已人工核對','歷史紀錄']; implicitHeight:42}
+                        }
                         Card {
-                            visible:backend.records.filter(function(r){return history.checked || r.current}).length === 0
-                            Layout.fillWidth:true; Layout.leftMargin:28; Layout.rightMargin:28; title:'目前沒有待處理的訂位'
+                            visible:window.filteredRecords.length === 0
+                            Layout.fillWidth:true; Layout.leftMargin:28; Layout.rightMargin:28; title:'沒有符合條件的紀錄'
                             Caption {text:'成功訂位後，車次、座位與繳費期限會顯示在這裡。'}
                             AppButton {text:'安排新行程'; primary:true; onClicked:backend.navigate(1)}
                         }
                         Repeater {
-                            model:backend.records
+                            model:window.filteredRecords
                             delegate:Card {
                                 required property var modelData
                                 visible:history.checked || modelData.current
@@ -259,6 +277,10 @@ ApplicationWindow {
                                 }
                                 Caption {text:(modelData.ticket.date || '日期未記錄') + '   ·   ' + (modelData.ticket.depart_time || '—') + '   ·   車次 ' + (modelData.ticket.train_id || '—')}
                                 Line {}
+                                Caption {
+                                    visible:modelData.status === 'resolved'
+                                    text:'人工核對：'+({'booked':'已訂位，原票保留','not_booked':'確認沒有成立訂位','cancelled':'已自行在官網取消'}[modelData.resolution] || '未記錄')+'  '+(modelData.confirmed_at || '')
+                                }
                                 GridLayout {
                                     columns:2; Layout.fillWidth:true; rowSpacing:12; columnSpacing:20
                                     Caption {text:'座位   ' + (modelData.ticket.seat || '—')}
@@ -267,13 +289,13 @@ ApplicationWindow {
                                     Caption {text:'票數   ' + (modelData.ticket.ticket_num_info || '—')}
                                 }
                                 RowLayout {
-                                    visible:modelData.current
+                                    AppButton {visible:!!modelData.code; text:'複製代碼'; onClicked:backend.copyCode(modelData.code)}
                                     AppButton {
-                                        visible:modelData.status === 'booked'; text:'移至歷史'; enabled:!backend.running
+                                        visible:modelData.current && modelData.status === 'booked'; text:'移至歷史'; enabled:!backend.running
                                         onClicked:{window.selected = modelData; archiveDialog.open()}
                                     }
                                     AppButton {
-                                        visible:modelData.status === 'submission_pending'; text:'處理待確認'; primary:true; enabled:!backend.running
+                                        visible:modelData.current && modelData.status === 'submission_pending'; text:'處理待確認'; primary:true; enabled:!backend.running
                                         onClicked:{window.selected=modelData; outcome.currentIndex=0; checkedWebsite.checked=false; confirmedCode.text=''; resolveDialog.open()}
                                     }
                                 }
@@ -299,12 +321,24 @@ ApplicationWindow {
                                 AppButton {text:'開啟資料夾'; onClicked:backend.folder()}
                             }
                             Caption {text:'載入舊設定會沿用原位置及關聯紀錄。新設定預設存放 App 使用者資料目錄。設定包含個人資料，請妥善保管。'}
+                            CheckBox {
+                                text:'使用 Windows 帳號保護身分證與手機'; checked:backend.protectPrivate
+                                enabled:backend.protectionAvailable && !backend.running
+                                onClicked:backend.setProtection(checked)
+                            }
+                            Caption {text:'按「儲存設定」後套用。受保護的設定需要原 Windows 帳號才能讀取；切換為明文後才適合移至其他電腦。訂位結果與備份仍需自行保管。'}
                         }
                         Card {
                             Layout.fillWidth:true; Layout.leftMargin:28; Layout.rightMargin:28; title:'Travel Desk'
-                            Caption {text:'版本 0.2.0 · Qt Quick 桌面版'}
+                            Caption {text:'版本 ' + backend.version + ' · Qt Quick 桌面版'}
                             Caption {text:'使用本機 Chrome 與 OCR。訂位完成後停止，不進行付款。'}
                             AppButton {text:'檢查執行環境'; enabled:!backend.running; onClicked:backend.checkEnvironment()}
+                            Line {}
+                            Caption {text:backend.updateMessage}
+                            RowLayout {
+                                AppButton {text:backend.updateChecking ? '檢查中…' : '檢查更新'; enabled:!backend.running && !backend.updateChecking; onClicked:backend.checkUpdates()}
+                                AppButton {text:'開啟發行頁'; visible:backend.updateAvailable; onClicked:backend.releasePage()}
+                            }
                         }
                         Item {height:12}
                     }
@@ -325,10 +359,25 @@ ApplicationWindow {
                 }
             }
             Rectangle {
-                Layout.fillWidth:true; implicitHeight:statusText.implicitHeight+24
+                Layout.fillWidth:true; implicitHeight:Math.max(48, statusText.implicitHeight+24)
                 color:backend.error ? '#fff0e8' : '#eaf2f1'
-                Text {id:statusText; anchors {left:parent.left; right:parent.right; verticalCenter:parent.verticalCenter; margins:28}
+                Text {id:statusText; anchors {left:parent.left; right:recoveryButton.left; verticalCenter:parent.verticalCenter; margins:28}
                     text:backend.status; color:backend.error ? '#a7532e' : '#53716c'; font.pixelSize:12; wrapMode:Text.WordWrap}
+                AppButton {id:recoveryButton; anchors.right:parent.right; anchors.rightMargin:16; anchors.verticalCenter:parent.verticalCenter
+                    visible:backend.recovery !== ''; text:backend.recovery === 'records' ? '核對訂位' : backend.recovery === 'settings' ? '檢查環境' : '調整設定'
+                    onClicked:backend.recover(); implicitHeight:36}
+            }
+        }
+    }
+    Dialog {
+        id:unsavedDialog; title:'尚有未儲存的變更'; anchors.centerIn:parent; modal:true; width:490
+        ColumnLayout {
+            width:parent.width; spacing:20
+            Caption {text:'請選擇是否儲存目前設定。取消會返回原畫面。'}
+            RowLayout {
+                AppButton {text:'取消'; onClicked:unsavedDialog.close()}
+                AppButton {text:'不儲存'; onClicked:{unsavedDialog.close(); backend.confirmAction(window.pendingAction, 'discard')}}
+                AppButton {text:'儲存後繼續'; primary:true; onClicked:{unsavedDialog.close(); backend.confirmAction(window.pendingAction, 'save')}}
             }
         }
     }

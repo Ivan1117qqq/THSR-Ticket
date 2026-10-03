@@ -29,7 +29,7 @@ def atomic_json(path, data):
 
 
 class RunRecords:
-    def __init__(self, state_path, event_sink=None):
+    def __init__(self, state_path, event_sink=None, output=print):
         state_path = Path(state_path)
         base = state_path.name.removesuffix('.state.json')
         self.run_id = uuid4().hex
@@ -38,6 +38,7 @@ class RunRecords:
         self.result_path = self.directory / 'result.json'
         self.disabled = False
         self.event_sink = event_sink
+        self.output = output
 
     def event(self, event, **fields):
         if self.event_sink is not None:
@@ -53,7 +54,7 @@ class RunRecords:
                 handle.write(json.dumps({'time': timestamp(), 'event': event, **fields}, ensure_ascii=False) + '\n')
         except OSError:
             self.disabled = True
-            print('執行紀錄無法寫入；本次後續紀錄將略過，不會因此重送訂位。')
+            self.output('執行紀錄無法寫入；本次後續紀錄將略過，不會因此重送訂位。')
 
     def save_result(self, tickets, outbound_date):
         self.directory.mkdir(parents=True, exist_ok=True)

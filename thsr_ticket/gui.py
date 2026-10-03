@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 
 from thsr_ticket.automation import AutomationRunner, TAIPEI
-from thsr_ticket.run_records import atomic_json
+from thsr_ticket.config_store import read_config_data, write_config_data, is_protected
 from thsr_ticket.booking_records import record_paths, record_entries, archive_booking, resolve_pending
 
 
@@ -468,7 +468,7 @@ def main():
         if not selected:
             return
         try:
-            data = json.loads(Path(selected).read_text(encoding='utf-8-sig'))
+            data = read_config_data(selected)
             if not isinstance(data, dict) or set(data) - set(values):
                 raise ValueError('不是可用的訂票設定檔，或包含未知欄位。')
             populate({**defaults, **data})
@@ -495,7 +495,8 @@ def main():
             messagebox.showerror('請換檔名', '請使用個人設定檔名稱，例如 booking.local.json。', parent=root)
             return None
         try:
-            atomic_json(Path(selected), json.loads(config.json()))
+            previous = json.loads(Path(path.get()).read_text(encoding='utf-8-sig')) if Path(path.get()).exists() else {}
+            write_config_data(Path(selected), json.loads(config.json()), protect=is_protected(previous))
         except OSError:
             messagebox.showerror('儲存失敗', '請確認資料夾可寫入。', parent=root)
             return None
