@@ -7,7 +7,7 @@ import time
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from requests import RequestException, Timeout, HTTPError
+from requests import RequestException, Timeout, HTTPError, ConnectionError
 from typing import List, Literal
 
 from bs4 import BeautifulSoup
@@ -136,7 +136,26 @@ def wait_until(target, now=lambda: datetime.now(TAIPEI), sleep=time.sleep):
 
 
 class WebsiteRejected(RuntimeError):
-    pass
+    @property
+    def user_message(self):
+        # Return fixed descriptions only; arbitrary website text can include personal data.
+        text = str(self)
+        groups = [
+            (('頻繁', '次數過多', '超過次數', '操作次數', '嘗試次數'),
+             '網站限制操作次數，請暫停操作，稍後再至官網確認。'),
+            (('驗證碼', '檢測碼'), '網站拒絕驗證碼，請至官網確認是否需要人工驗證。'),
+            (('逾時', '閒置', '有效時間'), '網站工作階段已逾時，請稍後重新啟動。'),
+            (('日期', '開放訂位', '可訂位'), '網站不接受目前訂位日期或訂位條件，請檢查行程。'),
+            (('維護', '暫停服務'), '網站正在維護或暫停服務，請稍後再試。'),
+        ]
+        return next((message for terms, message in groups if any(term in text for term in terms)),
+                    '網站拒絕本次操作，原因尚未分類；請開啟官網確認公告與訂位條件。')
+
+
+def transient_network_error(exc):
+    if isinstance(exc, HTTPError):
+        return exc.response is not None and exc.response.status_code in (502, 503, 504)
+    return isinstance(exc, (Timeout, ConnectionError))
 
 
 def check_errors(response):
@@ -236,43 +255,56 @@ class AutomationRunner:
     def _run(self, query_only=False):
         if not query_only and self.state_path.exists():
             raise RuntimeError(f'已有訂位送出紀錄，請先確認訂位狀態：{self.state_path}')
+        network_failures = 0
         for attempt in range(1, self.config.max_attempts + 1):
             self.attempt = attempt
             self.attempt_finished = False
             self.attempt_started = time.perf_counter()
             self.output(f'第 {attempt}/{self.config.max_attempts} 次查詢。')
-            with self.measure('homepage'):
-                first = self.client.request_booking_page()
-            check_errors(first)
-            page = BeautifulSoup(first.content, 'html.parser')
-            _parse_types_of_trip_value(page)
-            with self.measure('captcha_image'):
-                image = self.client.request_security_code_img(first.content)
-            image.raise_for_status()
-            with self.measure('ocr'):
-                guess = self.reader.recognize(image.content)
-            self.records.event('ocr', attempt=attempt, outcome='candidate' if guess else 'no_candidate',
-                               score=guess.score if guess else None)
-            if guess is None:
-                if self.reader.unavailable:
-                    raise RuntimeError('OCR 模型無法運作，已停止；請檢查套件與模型。')
-                self.retry(attempt, '驗證碼無可靠辨識結果，未送出查詢', 'ocr_no_candidate')
+            try:
+                with self.measure('homepage'):
+                    first = self.client.request_booking_page()
+                check_errors(first)
+                page = BeautifulSoup(first.content, 'html.parser')
+                _parse_types_of_trip_value(page)
+                with self.measure('captcha_image'):
+                    image = self.client.request_security_code_img(first.content)
+                image.raise_for_status()
+                with self.measure('ocr'):
+                    guess = self.reader.recognize(image.content)
+                self.records.event('ocr', attempt=attempt, outcome='candidate' if guess else 'no_candidate',
+                                   score=guess.score if guess else None)
+                if guess is None:
+                    if self.reader.unavailable:
+                        raise RuntimeError('OCR 模型無法運作，已停止；請檢查套件與模型。')
+                    self.retry(attempt, '驗證碼無可靠辨識結果，未送出查詢', 'ocr_no_candidate')
+                    continue
+                model = self.config.build_booking(self.config.dict(), _parse_search_by(page),
+                                                  _parse_seat_prefer_value(page), guess.text)
+                with self.measure('query'):
+                    reply = self.client.submit_booking_form(json.loads(model.json(by_alias=True)))
+                if captcha_rejected(reply):
+                    network_failures = 0
+                    self.retry(attempt, '網站回覆驗證碼錯誤', 'captcha_rejected')
+                    continue
+                selected = None
+                if not no_seats_response(reply):
+                    check_errors(reply)
+                    # An unexpected page is not evidence of sold-out trains.
+                    result_page = BeautifulSoup(reply.content, 'html.parser')
+                    if result_page.find('form', id='BookingS2Form') is None:
+                        raise RuntimeError('查詢未回傳車次表單，已停止；請確認網站狀態。')
+                    selected = self.config.select(AvailTrains().parse(reply.content))
+                network_failures = 0
+            except RequestException as exc:
+                if not transient_network_error(exc) or self.state_path.exists():
+                    raise
+                network_failures += 1
+                if network_failures >= 3:
+                    raise
+                self.retry(attempt, '查票連線暫時失敗', 'network_retry',
+                           delay=max(self.config.interval_seconds, 2 ** network_failures))
                 continue
-            model = self.config.build_booking(self.config.dict(), _parse_search_by(page),
-                                              _parse_seat_prefer_value(page), guess.text)
-            with self.measure('query'):
-                reply = self.client.submit_booking_form(json.loads(model.json(by_alias=True)))
-            if captcha_rejected(reply):
-                self.retry(attempt, '網站回覆驗證碼錯誤', 'captcha_rejected')
-                continue
-            selected = None
-            if not no_seats_response(reply):
-                check_errors(reply)
-                # An unexpected page is not evidence of sold-out trains.
-                result_page = BeautifulSoup(reply.content, 'html.parser')
-                if result_page.find('form', id='BookingS2Form') is None:
-                    raise RuntimeError('查詢未回傳車次表單，已停止；請確認網站狀態。')
-                selected = self.config.select(AvailTrains().parse(reply.content))
             if selected is not None:
                 self.output(f'符合條件：{selected.id:04d}，{selected.depart} → {selected.arrive}')
                 self.records.event('train_selected', train_id=f'{selected.id:04d}',
@@ -288,12 +320,13 @@ class AutomationRunner:
         self.output('已達查詢次數上限，未送出訂位。')
         return False
 
-    def retry(self, attempt, reason, outcome):
+    def retry(self, attempt, reason, outcome, delay=None):
         self.finish_attempt(outcome)
         self.phase = 'retry_wait'
+        delay = self.config.interval_seconds if delay is None else delay
         if attempt < self.config.max_attempts:
-            self.output(f'{reason}，{self.config.interval_seconds:g} 秒後重新取得首頁與驗證碼。')
-            self.sleep(self.config.interval_seconds)
+            self.output(f'{reason}，{delay:g} 秒後重新取得首頁與驗證碼。')
+            self.sleep(delay)
         else:
             self.output(f'{reason}，不再重試。')
 

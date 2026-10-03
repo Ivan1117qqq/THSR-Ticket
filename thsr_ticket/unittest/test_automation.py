@@ -18,6 +18,44 @@ def config():
                             outbound_date='2099-01-15', personal_id='A123456789', interval_seconds=0.5)
 
 
+def test_transient_query_disconnect_restarts_from_homepage(runner):
+    runner.client.submit_booking_form.side_effect = [Timeout(), response(html('trains'))]
+    assert runner.run(query_only=True)
+    assert runner.client.request_booking_page.call_count == 2
+    runner.sleep.assert_called_once_with(2)
+    runner.client.submit_ticket.assert_not_called()
+
+
+def test_consecutive_disconnect_stops_after_three_attempts(runner):
+    runner.client.request_booking_page.side_effect = Timeout()
+    with pytest.raises(Timeout):
+        runner.run()
+    assert runner.client.request_booking_page.call_count == 3
+    assert [call.args[0] for call in runner.sleep.call_args_list] == [2, 4]
+    assert not runner.state_path.exists()
+
+
+@pytest.mark.parametrize('status,retries', [(403, 1), (429, 1), (502, 3), (503, 3), (504, 3)])
+def test_http_retry_allowlist(runner, status, retries):
+    from requests import HTTPError
+    reply = response(b'error')
+    reply.status_code = status
+    runner.client.submit_booking_form.return_value = reply
+    with pytest.raises(HTTPError):
+        runner.run()
+    assert runner.client.submit_booking_form.call_count == retries
+    runner.client.submit_ticket.assert_not_called()
+
+
+def test_website_rejection_message_does_not_expose_private_content():
+    from thsr_ticket.automation import WebsiteRejected
+    error = WebsiteRejected('操作次數過多 A123456789 0912345678')
+    assert '網站限制操作次數' in error.user_message
+    assert 'A123456789' not in error.user_message
+    assert '0912345678' not in error.user_message
+    assert '尚未分類' in WebsiteRejected('private arbitrary response').user_message
+
+
 @pytest.fixture
 def runner(config, tmp_path, monkeypatch):
     monkeypatch.setattr('builtins.input', Mock(side_effect=AssertionError('Unexpected input')))
@@ -138,7 +176,10 @@ def test_failures_stop_without_booking(runner, failure):
     with pytest.raises((RuntimeError, Timeout)):
         runner.run()
     runner.client.submit_ticket.assert_not_called()
-    runner.sleep.assert_not_called()
+    if failure == 'timeout':
+        assert [call.args[0] for call in runner.sleep.call_args_list] == [2, 4]
+    else:
+        runner.sleep.assert_not_called()
 
 
 @pytest.mark.parametrize('failure', ['timeout', 'unparseable', 'rejected', 'interrupt'])

@@ -1,7 +1,7 @@
 """UI-independent form conversion and cooperative booking worker."""
 from pathlib import Path
 from requests import RequestException
-from thsr_ticket.automation import AutomationConfig, AutomationRunner, wait_until
+from thsr_ticket.automation import AutomationConfig, AutomationRunner, WebsiteRejected, wait_until
 
 
 STATIONS = ['南港', '台北', '板橋', '桃園', '新竹', '苗栗', '台中', '彰化', '雲林', '嘉義', '台南', '左營']
@@ -131,6 +131,9 @@ def run_background(config, path, query_only, stop, messages, client_factory=None
         phase = 'query'
         success = runner.run(query_only)
         outcome = ('找到符合車次' if query_only else '訂位成功，尚未付款') if success else '已達查詢上限'
+        if not success:
+            failure = 'attempt_limit'
+            outcome = '已達查詢輪數上限，未送出訂位；可調整查詢輪數或間隔後重新啟動。'
     except KeyboardInterrupt:
         failure = 'stopped'
         outcome = '已停止；若已嘗試送出訂位，請確認官網狀態'
@@ -145,9 +148,12 @@ def run_background(config, path, query_only, stop, messages, client_factory=None
         if phase in hints:
             outcome = hints[phase]
             failure = phase
+        elif isinstance(exc, WebsiteRejected):
+            failure = 'website_rejected'
+            outcome = exc.user_message
         elif isinstance(exc, RequestException):
             failure = 'network'
-            outcome = '網路連線失敗，請檢查連線後再手動啟動。'
+            outcome = '連線持續失敗或網站拒絕連線，已停止；請檢查網路與官網狀態後再啟動。'
     finally:
         state = path.resolve().with_suffix('.state.json')
         if failure and state.exists():
@@ -161,6 +167,7 @@ def run_background(config, path, query_only, stop, messages, client_factory=None
         emit(outcome)
         messages.put(('completion', {'code': failure or 'success', 'message': outcome,
                                      'action': 'records' if failure == 'booking_unconfirmed' else
+                                     'official' if failure == 'website_rejected' else
                                      'settings' if failure in ('browser_start', 'ocr_load') else
                                      'edit' if failure else ''}))
         messages.put(('done', outcome))
