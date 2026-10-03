@@ -38,6 +38,29 @@ def controller(qt, tmp_path):
     controller.timer.stop()
 
 
+def test_cancellation_link_does_not_change_state(controller, monkeypatch):
+    state = controller.path.with_suffix('.state.json')
+    state.write_text('{"status":"booked","booking_codes":["TEST1234"]}')
+    original = state.read_bytes()
+    controller.refresh()
+    opened = Mock(return_value=True)
+    monkeypatch.setattr('thsr_ticket.desktop.controller.QDesktopServices.openUrl', opened)
+    assert not controller.openCancellation('OTHER')
+    opened.assert_not_called()
+    assert controller.openCancellation('TEST1234')
+    assert 'History' in opened.call_args.args[0].toString()
+    assert state.read_bytes() == original
+    controller.confirmCancellation('TEST1234', pending_fingerprint(controller.path), False)
+    assert state.read_bytes() == original
+    controller._running = True
+    assert not controller.openCancellation('TEST1234')
+    controller.confirmCancellation('TEST1234', pending_fingerprint(controller.path), True)
+    assert state.read_bytes() == original
+    controller._running = False
+    controller.confirmCancellation('TEST1234', pending_fingerprint(controller.path), True)
+    assert not state.exists()
+
+
 def test_load_preserves_existing_state_location(controller, tmp_path):
     directory = tmp_path / 'legacy'
     directory.mkdir()

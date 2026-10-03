@@ -166,7 +166,8 @@ def record_entries(config_path):
             if current.get('status') == 'booked':
                 active_codes = booking_codes(current)
                 for code in active_codes:
-                    entries.append({'status': 'booked', 'code': code, 'current': True, 'ticket': {}})
+                    entries.append({'status': 'booked', 'code': code, 'current': True, 'ticket': {},
+                                    'fingerprint': pending_fingerprint(config_path)})
             else:
                 entries.append({'status': current.get('status', 'unknown'), 'code': '', 'current': True,
                                 'ticket': {'date': str(current.get('outbound_date', '—')),
@@ -198,6 +199,12 @@ def record_entries(config_path):
             if resolution.exists():
                 resolved = read_object(resolution)
                 code = resolved.get('booking_code', '')
+                if code and resolved.get('outcome') == 'cancelled':
+                    match = next((item for item in entries if item['code'] == code and not item['current']), None)
+                    if match is not None:
+                        match.update(status='resolved', resolution='cancelled',
+                                     confirmed_at=resolved.get('confirmed_at', ''))
+                        continue
                 entries.append({'status': 'resolved', 'code': code, 'current': False,
                                 'ticket': {'date': str(data.get('outbound_date', '')),
                                            'train_id': str(data.get('train_id', ''))},
@@ -210,3 +217,26 @@ def record_entries(config_path):
         except (ValueError, OSError, TypeError):
             continue
     return entries
+
+
+def confirm_cancelled(config_path, code, fingerprint, confirmed=False):
+    """Record the user's completed official cancellation; this does not cancel a ticket itself."""
+    if not confirmed:
+        raise ValueError('請先確認官網已顯示取消成功。')
+    state, runs = record_paths(config_path)
+    with record_lock(state):
+        if pending_fingerprint(config_path) != fingerprint:
+            raise ValueError('紀錄已變更，請重新整理。')
+        data = read_object(state)
+        if data.get('status') != 'booked' or booking_codes(data) != [code]:
+            raise ValueError('只能處理目前單筆已訂位紀錄。')
+        directory = runs / 'archives' / uuid4().hex
+        if not directory.resolve().is_relative_to(runs.resolve()):
+            raise ValueError('封存路徑超出紀錄目錄。')
+        directory.mkdir(parents=True, exist_ok=False)
+        atomic_json(directory / 'resolution.json', {
+            'confirmed_at': timestamp(), 'source': 'user_verified',
+            'outcome': 'cancelled', 'booking_code': code,
+        })
+        state.rename(directory / 'state.json')
+        return directory

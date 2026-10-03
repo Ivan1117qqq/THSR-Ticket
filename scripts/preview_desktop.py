@@ -15,7 +15,7 @@ def main():
     args = parser.parse_args()
     os.environ['QT_QPA_PLATFORM'] = 'offscreen'
     os.environ['QT_SCALE_FACTOR'] = args.scale
-    from PySide6.QtCore import QUrl
+    from PySide6.QtCore import QUrl, QObject, QMetaObject
     from PySide6.QtGui import QFontDatabase
     from PySide6.QtWidgets import QApplication
     from PySide6.QtQml import QQmlApplicationEngine
@@ -56,6 +56,16 @@ def main():
             frame = window.grabWindow()
             if not frame.save(str(destination / f'page-{page}-scale-{args.scale}.png')):
                 raise RuntimeError('Failed to save preview')
+        demo_record = controller._records[0]
+        controller.navigate(3)
+        controller._records = [demo_record]
+        controller.changed.emit()
+        window.setProperty('selected', demo_record)
+        QMetaObject.invokeMethod(window.findChild(QObject, 'cancellationDialog'), 'open')
+        for _ in range(30):
+            app.processEvents()
+        if not window.grabWindow().save(str(destination / f'cancel-scale-{args.scale}.png')):
+            raise RuntimeError('Failed to save cancellation preview')
         window.setProperty('allowClose', True)
         window.close()
         controller.timer.stop()

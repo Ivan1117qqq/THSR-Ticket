@@ -15,7 +15,9 @@ from pydantic import ValidationError
 
 from thsr_ticket.application import STATIONS, FIELDS, FieldError, form_config, protected_config_path, run_background
 from thsr_ticket.automation import TAIPEI
-from thsr_ticket.booking_records import record_entries, record_paths, archive_booking, resolve_pending
+from thsr_ticket.booking_records import (
+    record_entries, record_paths, archive_booking, resolve_pending, confirm_cancelled,
+)
 from thsr_ticket.config_store import read_config_data, write_config_data, is_protected
 from thsr_ticket.desktop.preferences import Preferences
 from thsr_ticket.desktop.updates import check_release, RELEASES
@@ -390,6 +392,9 @@ class DesktopController(QObject):
 
     @Slot()
     def recover(self):
+        if self._recovery == 'official':
+            self.official()
+            return
         self.navigate({'records': 3, 'settings': 4, 'edit': 1}.get(self._recovery, 1))
 
     @Slot()
@@ -478,6 +483,28 @@ class DesktopController(QObject):
     @Slot()
     def official(self):
         QDesktopServices.openUrl(QUrl('https://irs.thsrc.com.tw/IMINT/'))
+
+    @Slot(str, result=bool)
+    def openCancellation(self, code):
+        if self._running or not any(item.get('code') == code and item.get('current')
+                                    and item.get('status') == 'booked' for item in self._records):
+            return False
+        opened = QDesktopServices.openUrl(QUrl(
+            'https://irs.thsrc.com.tw/IMINT/?wicket:bookmarkablePage=:tw.com.mitac.webapp.thsr.viewer.History'))
+        self.notify('請在官網查詢該筆訂位，核對行程後操作取消；完成後回到此視窗確認。' if opened
+                    else '無法開啟瀏覽器，請手動進入高鐵官網「管理訂位」。', not opened)
+        return opened
+
+    @Slot(str, str, bool)
+    def confirmCancellation(self, code, fingerprint, confirmed):
+        if self._running:
+            return
+        try:
+            confirm_cancelled(self.path, code, fingerprint, confirmed)
+            self.refresh()
+            self.notify('已依你的官網確認結果標記取消並封存，可準備下一筆訂位。')
+        except (ValueError, OSError, RuntimeError):
+            self.notify('未變更紀錄：請確認官網取消結果，並重新整理本機紀錄。', True)
 
     @Slot(str)
     def copyCode(self, code):

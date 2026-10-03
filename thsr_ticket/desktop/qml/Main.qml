@@ -291,6 +291,10 @@ ApplicationWindow {
                                 RowLayout {
                                     AppButton {visible:!!modelData.code; text:'複製代碼'; onClicked:backend.copyCode(modelData.code)}
                                     AppButton {
+                                        visible:modelData.current && modelData.status === 'booked'; text:'官網取消訂位'; enabled:!backend.running
+                                        onClicked:{window.selected=modelData; cancellationConfirmed.checked=false; cancellationDialog.open()}
+                                    }
+                                    AppButton {
                                         visible:modelData.current && modelData.status === 'booked'; text:'移至歷史'; enabled:!backend.running
                                         onClicked:{window.selected = modelData; archiveDialog.open()}
                                     }
@@ -364,7 +368,7 @@ ApplicationWindow {
                 Text {id:statusText; anchors {left:parent.left; right:recoveryButton.left; verticalCenter:parent.verticalCenter; margins:28}
                     text:backend.status; color:backend.error ? '#a7532e' : '#53716c'; font.pixelSize:12; wrapMode:Text.WordWrap}
                 AppButton {id:recoveryButton; anchors.right:parent.right; anchors.rightMargin:16; anchors.verticalCenter:parent.verticalCenter
-                    visible:backend.recovery !== ''; text:backend.recovery === 'records' ? '核對訂位' : backend.recovery === 'settings' ? '檢查環境' : '調整設定'
+                    visible:backend.recovery !== ''; text:backend.recovery === 'records' ? '核對訂位' : backend.recovery === 'settings' ? '檢查環境' : backend.recovery === 'official' ? '開啟官網' : '調整設定'
                     onClicked:backend.recover(); implicitHeight:36}
             }
         }
@@ -378,6 +382,26 @@ ApplicationWindow {
                 AppButton {text:'取消'; onClicked:unsavedDialog.close()}
                 AppButton {text:'不儲存'; onClicked:{unsavedDialog.close(); backend.confirmAction(window.pendingAction, 'discard')}}
                 AppButton {text:'儲存後繼續'; primary:true; onClicked:{unsavedDialog.close(); backend.confirmAction(window.pendingAction, 'save')}}
+            }
+        }
+    }
+    Dialog {
+        id:cancellationDialog; objectName:'cancellationDialog'; title:'取消官網訂位'; anchors.centerIn:parent; modal:true; width:550
+        ColumnLayout {
+            width:parent.width; spacing:16
+            Label {text:'訂位代碼：' + (window.selected ? window.selected.code : ''); font.bold:true}
+            Caption {text:window.selected ? [window.selected.ticket.date || '', window.selected.ticket.start_station || '', '→', window.selected.ticket.dest_station || '', window.selected.ticket.depart_time || ''].join(' ') : ''}
+            Caption {text:'1. 前往官網，輸入取票識別碼、訂位代碼與驗證碼。核對行程後選擇取消／修改訂位，完成官網最後確認。已付款訂位請先確認退票費用。'}
+            RowLayout {
+                AppButton {text:'複製訂位代碼'; onClicked:backend.copyCode(window.selected.code)}
+                AppButton {text:'前往官網取消'; primary:true; onClicked:backend.openCancellation(window.selected.code)}
+            }
+            Caption {text:'2. 官網顯示取消成功後，回到此處確認。只開啟官網或關閉此視窗不會取消訂位，也不會移除本機紀錄。'}
+            CheckBox {id:cancellationConfirmed; text:'我已在官網確認這筆訂位取消成功'}
+            RowLayout {
+                AppButton {text:'尚未完成，返回'; onClicked:cancellationDialog.close()}
+                AppButton {text:'記錄已取消並封存'; enabled:cancellationConfirmed.checked && !backend.running
+                    onClicked:{backend.confirmCancellation(window.selected.code, window.selected.fingerprint, cancellationConfirmed.checked); cancellationDialog.close()}}
             }
         }
     }

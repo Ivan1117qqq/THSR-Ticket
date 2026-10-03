@@ -9,6 +9,7 @@ from thsr_ticket.unittest.test_current_flow import html
 from thsr_ticket.view_model.booking_result import BookingResult
 from thsr_ticket.booking_records import pending_fingerprint, resolve_pending, record_entries
 from thsr_ticket.record_lock import record_lock
+from thsr_ticket.booking_records import confirm_cancelled
 
 
 @pytest.fixture
@@ -18,6 +19,35 @@ def files(tmp_path):
     state, runs = record_paths(config)
     state.write_text(json.dumps({'status': 'booked', 'booking_codes': ['TEST1234']}))
     return config, state, runs
+
+
+def test_confirm_official_cancellation_preserves_original(files):
+    config, state, _ = files
+    original = state.read_bytes()
+    fingerprint = pending_fingerprint(config)
+    with pytest.raises(ValueError):
+        confirm_cancelled(config, 'TEST1234', fingerprint)
+    with pytest.raises(ValueError):
+        confirm_cancelled(config, 'OTHER', fingerprint, True)
+    assert state.read_bytes() == original
+    directory = confirm_cancelled(config, 'TEST1234', fingerprint, True)
+    assert (directory / 'state.json').read_bytes() == original
+    assert not state.exists()
+    entry = record_entries(config)[0]
+    assert entry['resolution'] == 'cancelled'
+    assert entry['code'] == 'TEST1234'
+    assert not entry['current']
+
+
+def test_cancellation_stale_confirmation_or_operation_lock_keeps_state(files):
+    config, state, _ = files
+    fingerprint = pending_fingerprint(config)
+    with record_lock(state), pytest.raises(RuntimeError):
+        confirm_cancelled(config, 'TEST1234', fingerprint, True)
+    state.write_text('{"status":"booked","booking_codes":["OTHER"]}')
+    with pytest.raises(ValueError):
+        confirm_cancelled(config, 'TEST1234', fingerprint, True)
+    assert state.exists()
 
 
 @pytest.mark.parametrize('outcome', ['booked', 'not_booked', 'cancelled'])
