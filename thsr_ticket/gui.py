@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 
 from thsr_ticket.automation import AutomationRunner, TAIPEI
-from thsr_ticket.config_store import read_config_data, write_config_data, is_protected
+from thsr_ticket.config_store import read_config_data, write_config_data, is_protected, ConfigVersionError
 from thsr_ticket.booking_records import record_paths, record_entries, archive_booking, resolve_pending
 
 
@@ -476,6 +476,8 @@ def main():
             has_save_target[0] = not protected_config_path(selected)
             status.set('已載入，請核對日期與時間。')
             refresh_records()
+        except ConfigVersionError as exc:
+            messagebox.showerror('設定版本不相容', str(exc), parent=root)
         except (ValueError, OSError, TypeError):
             messagebox.showerror('載入失敗', '請確認選擇的是訂票設定 JSON，而非狀態或結果檔。', parent=root)
 
@@ -497,7 +499,7 @@ def main():
         try:
             previous = json.loads(Path(path.get()).read_text(encoding='utf-8-sig')) if Path(path.get()).exists() else {}
             write_config_data(Path(selected), json.loads(config.json()), protect=is_protected(previous))
-        except OSError:
+        except (OSError, ValueError):
             messagebox.showerror('儲存失敗', '請確認資料夾可寫入。', parent=root)
             return None
         path.set(selected)

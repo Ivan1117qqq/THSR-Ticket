@@ -4,10 +4,27 @@ import ctypes
 import json
 import os
 from pathlib import Path
+from uuid import uuid4
 
 from thsr_ticket.run_records import atomic_json
 
 PRIVATE_FIELDS = ('personal_id', 'phone_num')
+SCHEMA_VERSION = 1
+VERSION_KEY = '_schema_version'
+
+
+class ConfigVersionError(ValueError):
+    """Safe fixed text suitable for displaying without exposing file contents."""
+
+
+def config_payload(data):
+    if not isinstance(data, dict):
+        raise ValueError('設定必須是 JSON 物件。')
+    if VERSION_KEY in data:
+        version = data[VERSION_KEY]
+        if type(version) is not int or version != SCHEMA_VERSION:
+            raise ConfigVersionError('不支援此設定格式版本，請使用相容版本的程式；原檔未變更。')
+    return {key: value for key, value in data.items() if key != VERSION_KEY}
 
 
 def _dpapi(data, decrypt=False):
@@ -42,9 +59,7 @@ def is_protected(data):
 
 
 def read_config_data(path):
-    data = json.loads(Path(path).read_text(encoding='utf-8-sig'))
-    if not isinstance(data, dict):
-        raise ValueError('設定必須是 JSON 物件。')
+    data = config_payload(json.loads(Path(path).read_text(encoding='utf-8-sig')))
     for key in PRIVATE_FIELDS:
         value = data.get(key)
         if isinstance(value, dict):
@@ -58,9 +73,25 @@ def read_config_data(path):
 
 
 def write_config_data(path, data, protect=False):
-    stored = dict(data)
+    path = Path(path)
+    stored = config_payload(data)
+    original = None
+    if path.exists():
+        original = path.read_bytes()
+        previous = json.loads(original.decode('utf-8-sig'))
+        config_payload(previous)  # Never overwrite unknown future formats or damaged JSON.
+        if VERSION_KEY in previous:
+            original = None
+    stored[VERSION_KEY] = SCHEMA_VERSION
     for key in PRIVATE_FIELDS:
         if protect and stored.get(key):
             stored[key] = {'protection': 'windows-dpapi',
                            'value': base64.b64encode(_dpapi(str(stored[key]).encode('utf-8'))).decode('ascii')}
-    atomic_json(Path(path), stored)
+    if original is not None:
+        backups = path.parent / (path.name + '.config-backups')
+        backups.mkdir(exist_ok=True)
+        with (backups / (uuid4().hex + '.json')).open('xb') as handle:
+            handle.write(original)
+            handle.flush()
+            os.fsync(handle.fileno())
+    atomic_json(path, stored)

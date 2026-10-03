@@ -17,3 +17,4 @@ booking.local.json
 *.runs/
 *.archive.lock
 *.operation.lock
+*.config-backups/
