@@ -173,5 +173,8 @@
 | [thsr_ticket/view_model/avail_trains.py](../thsr_ticket/view_model/avail_trains.py) | 從網站 HTML 解析可選車次。 |
 | [thsr_ticket/view_model/booking_result.py](../thsr_ticket/view_model/booking_result.py) | 從網站 HTML 解析訂位代碼、行程、座位及價款。 |
 | [thsr_ticket/view_model/error_feedback.py](../thsr_ticket/view_model/error_feedback.py) | 解析網站錯誤訊息區塊。 |
+| [thsr_ticket/task_status.py](../thsr_ticket/task_status.py) | 0.3.2 的有限欄位任務摘要與純函式狀態判定；訂位 state 優先，不自動重送。 |
+| [thsr_ticket/desktop/qml/TaskPanel.qml](../thsr_ticket/desktop/qml/TaskPanel.qml) | 首頁與進度頁共用狀態卡、階段與復原入口。 |
+| [thsr_ticket/unittest/test_task_status.py](../thsr_ticket/unittest/test_task_status.py) | 狀態優先序、損壞資料、摘要欄位限制與復原路由測試。 |
 
-本表共 122 個檔案。
+0.3.2 增補後，本表共 125 個檔案。設定旁的 `*.task.json` 為本機任務摘要，已加入 Git 忽略清單；不保存個資，也不取代原有防重送紀錄。

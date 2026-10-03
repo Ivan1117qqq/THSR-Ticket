@@ -48,7 +48,8 @@ python -m venv .venv
 詳細操作、資料路徑與 Windows EXE 打包見 [Travel Desk 說明](docs/desktop.md)。
 0.3.0 提供設定記憶、時間選擇、未儲存提醒、訂位篩選、個資保護與手動更新檢查。
 0.3.1 加入官網取消引導與人工確認封存、查票暫時斷線退避重試，以及網站拒絕原因分類；取消的最後確認仍在官網完成，詳見 [桌面版說明](docs/desktop.md)。
-Windows 安裝包位於 `dist/installer/TravelDesk-Setup-0.3.1.exe`，目前交付未簽章版本。
+0.3.2 加入共用任務狀態卡、重新啟動後的任務摘要與對應復原入口；既有訂位狀態優先，不自動恢復或重送任務。
+Windows 安裝包位於 `dist/installer/TravelDesk-Setup-0.3.2.exe`，目前交付未簽章版本。
 舊 Tk 介面仍可用 `python -m thsr_ticket.gui` 啟動，操作見 [舊版說明](docs/gui.md)。
 
 ## 定時自動訂位
