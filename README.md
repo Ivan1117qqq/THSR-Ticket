@@ -40,6 +40,8 @@ python -m venv .venv
 **本機封存不會取消官網訂位。**
 
 詳細操作、資料路徑與 Windows EXE 打包見 [Travel Desk 說明](docs/desktop.md)。
+0.3.0 提供設定記憶、時間選擇、未儲存提醒、訂位篩選、個資保護與手動更新檢查。
+Windows 安裝包位於 `dist/installer/TravelDesk-Setup-0.3.0.exe`，目前交付未簽章版本。
 舊 Tk 介面仍可用 `python -m thsr_ticket.gui` 啟動，操作見 [舊版說明](docs/gui.md)。
 
 ## 定時自動訂位
