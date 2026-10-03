@@ -56,6 +56,13 @@ def main():
             frame = window.grabWindow()
             if not frame.save(str(destination / f'page-{page}-scale-{args.scale}.png')):
                 raise RuntimeError('Failed to save preview')
+        controller.prepareDiagnostics()
+        QMetaObject.invokeMethod(window.findChild(QObject, 'diagnosticDialog'), 'open')
+        for _ in range(30):
+            app.processEvents()
+        if not window.grabWindow().save(str(destination / f'diagnostics-scale-{args.scale}.png')):
+            raise RuntimeError('Failed to save diagnostics preview')
+        QMetaObject.invokeMethod(window.findChild(QObject, 'diagnosticDialog'), 'close')
         demo_record = controller._records[0]
         controller.navigate(3)
         controller._records = [demo_record]

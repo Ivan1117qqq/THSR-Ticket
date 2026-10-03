@@ -39,6 +39,34 @@ def controller(qt, tmp_path):
     controller.timer.stop()
 
 
+def test_diagnostic_preview_exports_exact_snapshot_without_overwrite(controller, tmp_path, monkeypatch):
+    controller._messages.put(('event', {'event': 'run_stopped', 'reason': 'network_timeout',
+                                        'code': 'SECRET-BOOKING'}))
+    controller.poll()
+    controller.prepareDiagnostics()
+    preview = controller.diagnosticPreview
+    assert 'SECRET-BOOKING' not in preview
+    target = tmp_path / 'support.diagnostics.json'
+    monkeypatch.setattr('thsr_ticket.desktop.controller.QFileDialog.getSaveFileName',
+                        lambda *args: (str(target), ''))
+    controller._diagnostic_events.append({'event': 'run_finished'})
+    controller.exportDiagnostics()
+    assert target.read_text(encoding='utf-8') == preview + '\n'
+    target.write_text('existing')
+    controller.exportDiagnostics()
+    assert target.read_text() == 'existing'
+
+
+def test_diagnostic_cancel_and_config_destination_are_safe(controller, tmp_path, monkeypatch):
+    controller.prepareDiagnostics()
+    target = tmp_path / 'booking.local.json'
+    for destination in ('', str(target)):
+        monkeypatch.setattr('thsr_ticket.desktop.controller.QFileDialog.getSaveFileName',
+                            lambda *args: (destination, ''))
+        controller.exportDiagnostics()
+        assert not target.exists()
+
+
 def test_startup_pending_is_visible_even_without_config(qt, tmp_path):
     state = tmp_path / 'booking.local.state.json'
     state.write_text('{"status":"submission_pending"}')

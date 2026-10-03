@@ -319,6 +319,7 @@ ApplicationWindow {
                         Item {height:8}
                         Card {
                             Layout.fillWidth:true; Layout.leftMargin:28; Layout.rightMargin:28; title:'設定與資料'
+                            AppButton {text:'匯出診斷資料'; onClicked:{backend.prepareDiagnostics(); diagnosticDialog.open()}}
                             Caption {text:'目前設定位置'}
                             TextEdit {readOnly:true; text:backend.configPath; Layout.fillWidth:true; wrapMode:Text.WrapAnywhere; color:'#30445c'; selectByMouse:true}
                             RowLayout {
@@ -372,6 +373,21 @@ ApplicationWindow {
                 AppButton {id:recoveryButton; anchors.right:parent.right; anchors.rightMargin:16; anchors.verticalCenter:parent.verticalCenter
                     visible:backend.recovery !== ''; text:backend.recovery === 'records' ? '核對訂位' : backend.recovery === 'settings' ? '檢查環境' : backend.recovery === 'official' ? '開啟官網' : '調整設定'
                     onClicked:backend.recover(); implicitHeight:36}
+            }
+        }
+    }
+    Dialog {
+        id:diagnosticDialog; objectName:'diagnosticDialog'; title:'診斷資料預覽'; anchors.centerIn:parent; modal:true; width:600
+        contentItem:ColumnLayout {
+            Caption {text:'包含本次開啟 App 後最近 200 筆簡化事件與狀態，不含個資、訂位代碼或完整日誌。重開 App 後不載入歷史事件。'}
+            ScrollView {
+                Layout.fillWidth:true; Layout.preferredHeight:300; clip:true
+                TextArea {text:backend.diagnosticPreview; readOnly:true; selectByMouse:true; wrapMode:TextEdit.WrapAnywhere}
+            }
+            RowLayout {
+                Item {Layout.fillWidth:true}
+                AppButton {text:'返回'; onClicked:diagnosticDialog.close()}
+                AppButton {text:'確認匯出'; primary:true; onClicked:backend.exportDiagnostics()}
             }
         }
     }

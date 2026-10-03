@@ -5,6 +5,7 @@ import queue
 import threading
 import importlib.util
 import os
+from collections import deque
 from datetime import datetime
 from pathlib import Path
 
@@ -18,10 +19,11 @@ from thsr_ticket.automation import TAIPEI
 from thsr_ticket.booking_records import (
     record_entries, record_paths, archive_booking, resolve_pending, confirm_cancelled,
 )
-from thsr_ticket.config_store import read_config_data, write_config_data, is_protected
+from thsr_ticket.config_store import read_config_data, write_config_data, is_protected, ConfigVersionError
 from thsr_ticket.desktop.preferences import Preferences
 from thsr_ticket.desktop.updates import check_release, RELEASES
 from thsr_ticket.version import VERSION
+from thsr_ticket.diagnostics import safe_event, snapshot
 from thsr_ticket.task_status import load_task, save_task, booking_guard, task_view
 
 
@@ -92,6 +94,8 @@ class DesktopController(QObject):
         self._running = False
         self._page = 0
         self._log = ''
+        self._diagnostic_events = deque(maxlen=200)
+        self._diagnostic_preview = ''
         self._error = False
         self._issues = {}
         self._match = {}
@@ -113,6 +117,37 @@ class DesktopController(QObject):
         elif previous:
             self.notify('上次使用的設定已移動或不存在，請重新載入；不會自動建立另一份設定。', True)
         self.refresh()
+
+    @Property(str, notify=changed)
+    def diagnosticPreview(self):
+        return self._diagnostic_preview
+
+    @Slot()
+    def prepareDiagnostics(self):
+        self._diagnostic_preview = json.dumps(snapshot(
+            self._diagnostic_events, self._task_snapshot.get('code'), self._guard, self._running),
+            ensure_ascii=False, indent=2)
+        self.changed.emit()
+
+    @Slot()
+    def exportDiagnostics(self):
+        if not self._diagnostic_preview:
+            return
+        target, _ = QFileDialog.getSaveFileName(
+            None, '匯出診斷資料', str(self.data_dir / 'travel-desk.diagnostics.json'), 'JSON (*.json)')
+        if not target:
+            return
+        if not target.endswith('.diagnostics.json'):
+            self.notify('請使用 .diagnostics.json 副檔名，以免與訂票設定混淆。', True)
+            return
+        try:
+            with Path(target).open('x', encoding='utf-8') as handle:
+                handle.write(self._diagnostic_preview + '\n')
+            self.notify('診斷資料已匯出；未傳送至網路。')
+        except FileExistsError:
+            self.notify('檔案已存在，請選擇新的檔名。', True)
+        except OSError:
+            self.notify('無法匯出診斷資料，請確認目的資料夾可寫入。', True)
 
     @Property('QVariantMap', notify=changed)
     def task(self):
@@ -295,6 +330,9 @@ class DesktopController(QObject):
             self.notify('已載入設定，請核對日期與時間。')
             self.remember()
             return True
+        except ConfigVersionError as exc:
+            self.notify(str(exc), True)
+            return False
         except (ValueError, OSError, TypeError):
             self.notify('無法載入；請選擇有效的訂票設定 JSON。', True)
             return False
@@ -354,6 +392,8 @@ class DesktopController(QObject):
         try:
             self.save_config()
             self.notify('設定已儲存。')
+        except ConfigVersionError as exc:
+            self.notify(str(exc), True)
         except (ValueError, OSError):
             self.notify('儲存失敗：請檢查日期、時段、票數、身分證與儲存位置。', True)
 
@@ -465,6 +505,9 @@ class DesktopController(QObject):
                 if value.startswith('等待啟動時間'):
                     self._stage = 'schedule'
             elif kind == 'event':
+                clean = safe_event(value)
+                if clean:
+                    self._diagnostic_events.append(clean)
                 if value.get('phase'):
                     self._stage = value['phase']
                 self._attempt = value.get('attempt', self._attempt)
