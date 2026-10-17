@@ -57,6 +57,33 @@ def test_diagnostic_preview_exports_exact_snapshot_without_overwrite(controller,
     assert target.read_text() == 'existing'
 
 
+def test_storage_preview_and_restore(controller):
+    from thsr_ticket.booking_records import record_paths
+    _, runs = record_paths(controller.path)
+    directory = runs / ('a' * 32)
+    directory.mkdir(parents=True)
+    (directory / 'events.jsonl').write_bytes(b'{"event":"run_finished"}\n')
+    controller.prepareStorage()
+    assert len(controller._storage_items) == 1
+    controller.cleanStorage()
+    assert not directory.exists()
+    controller._history_backup = None  # Simulate loss of in-memory state after restart.
+    controller.restoreStorage()
+    assert directory.exists()
+
+
+def test_storage_cannot_clean_after_config_switch(controller):
+    from thsr_ticket.booking_records import record_paths
+    _, runs = record_paths(controller.path)
+    directory = runs / ('a' * 32)
+    directory.mkdir(parents=True)
+    (directory / 'events.jsonl').write_bytes(b'{"event":"run_finished"}\n')
+    controller.prepareStorage()
+    controller.path = controller.path.with_name('other.json')
+    controller.cleanStorage()
+    assert directory.exists()
+
+
 def test_diagnostic_cancel_and_config_destination_are_safe(controller, tmp_path, monkeypatch):
     controller.prepareDiagnostics()
     target = tmp_path / 'booking.local.json'

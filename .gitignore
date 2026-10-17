@@ -18,3 +18,4 @@ booking.local.json
 *.archive.lock
 *.operation.lock
 *.config-backups/
+*.runs.history-backups/

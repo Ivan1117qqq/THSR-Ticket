@@ -24,6 +24,7 @@ from thsr_ticket.desktop.preferences import Preferences
 from thsr_ticket.desktop.updates import check_release, RELEASES
 from thsr_ticket.version import VERSION
 from thsr_ticket.diagnostics import safe_event, snapshot
+from thsr_ticket.record_storage import inventory, move_history, restore_history, latest_backup
 from thsr_ticket.task_status import load_task, save_task, booking_guard, task_view
 
 
@@ -96,6 +97,10 @@ class DesktopController(QObject):
         self._log = ''
         self._diagnostic_events = deque(maxlen=200)
         self._diagnostic_preview = ''
+        self._storage_items = []
+        self._storage_config = None
+        self._storage_message = ''
+        self._history_backup = None
         self._error = False
         self._issues = {}
         self._match = {}
@@ -121,6 +126,60 @@ class DesktopController(QObject):
     @Property(str, notify=changed)
     def diagnosticPreview(self):
         return self._diagnostic_preview
+
+    @Property(str, notify=changed)
+    def storagePreview(self):
+        return self._storage_message
+
+    @Property(bool, notify=changed)
+    def canCleanStorage(self):
+        return bool(self._storage_items) and not self._running and self.path == self._storage_config
+
+    @Slot()
+    def prepareStorage(self):
+        self._storage_items = []
+        self._storage_config = self.path
+        try:
+            if self._running:
+                raise ValueError('請先停止任務。')
+            self._storage_items = inventory(self.path)
+            total = sum(item['bytes'] for item in self._storage_items)
+            self._storage_message = f'可移至備份：{len(self._storage_items)} 筆執行紀錄，共 {total:,} bytes。'
+            if record_paths(self.path)[0].exists():
+                self._storage_message = '目前有訂位或待確認狀態，請先在「我的訂位」核對並封存。'
+        except (OSError, ValueError):
+            self._storage_message = '無法讀取紀錄，請確認任務已停止與資料夾權限。'
+        self.changed.emit()
+
+    @Slot()
+    def cleanStorage(self):
+        if self._running or self.path != self._storage_config:
+            self.notify('設定或任務已變更，請重新預覽。', True)
+            return
+        try:
+            self._history_backup = (self.path, move_history(self.path, self._storage_items))
+            self._storage_items = []
+            self.refresh()
+            self.notify('歷史紀錄已移至備份；官網訂位不變，可還原最近一次整理。')
+        except (OSError, ValueError, RuntimeError):
+            self.notify('無法整理，請停止任務並重新預覽；請保留備份與原始紀錄。', True)
+
+    @Slot()
+    def restoreStorage(self):
+        if self._running:
+            self.notify('請先停止任務。', True)
+            return
+        try:
+            backup = latest_backup(self.path)
+            if backup is None:
+                self.notify('此設定沒有可還原的整理紀錄。')
+                return
+            restore_history(self.path, backup)
+            self._history_backup = None
+            self.refresh()
+            self.notify('歷史紀錄已還原。')
+        except (OSError, ValueError, RuntimeError):
+            self.notify('還原未完成，請保留備份並確認紀錄位置與權限。', True)
 
     @Slot()
     def prepareDiagnostics(self):

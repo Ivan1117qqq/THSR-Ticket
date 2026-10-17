@@ -320,6 +320,10 @@ ApplicationWindow {
                         Card {
                             Layout.fillWidth:true; Layout.leftMargin:28; Layout.rightMargin:28; title:'設定與資料'
                             AppButton {text:'匯出診斷資料'; onClicked:{backend.prepareDiagnostics(); diagnosticDialog.open()}}
+                            RowLayout {
+                                AppButton {text:'整理歷史紀錄'; enabled:!backend.running; onClicked:{backend.prepareStorage(); storageDialog.open()}}
+                                AppButton {text:'還原最近整理'; enabled:!backend.running; onClicked:backend.restoreStorage()}
+                            }
                             Caption {text:'目前設定位置'}
                             TextEdit {readOnly:true; text:backend.configPath; Layout.fillWidth:true; wrapMode:Text.WrapAnywhere; color:'#30445c'; selectByMouse:true}
                             RowLayout {
@@ -388,6 +392,18 @@ ApplicationWindow {
                 Item {Layout.fillWidth:true}
                 AppButton {text:'返回'; onClicked:diagnosticDialog.close()}
                 AppButton {text:'確認匯出'; primary:true; onClicked:backend.exportDiagnostics()}
+            }
+        }
+    }
+    Dialog {
+        id:storageDialog; objectName:'storageDialog'; title:'整理歷史紀錄'; anchors.centerIn:parent; modal:true; width:550
+        ColumnLayout {
+            width:parent.width; spacing:16
+            Caption {text:backend.storagePreview}
+            Caption {text:'將已結束的執行紀錄移至本機備份，不釋放磁碟空間，不取消官網訂位。封存狀態、未完成與未知檔案均保留；重開程式後仍可還原最近一次整理。'}
+            RowLayout {
+                AppButton {text:'返回'; onClicked:storageDialog.close()}
+                AppButton {text:'確認移至備份'; enabled:backend.canCleanStorage; onClicked:{backend.cleanStorage(); storageDialog.close()}}
             }
         }
     }

@@ -57,6 +57,13 @@ def main():
             if not frame.save(str(destination / f'page-{page}-scale-{args.scale}.png')):
                 raise RuntimeError('Failed to save preview')
         controller.prepareDiagnostics()
+        controller.prepareStorage()
+        QMetaObject.invokeMethod(window.findChild(QObject, 'storageDialog'), 'open')
+        for _ in range(30):
+            app.processEvents()
+        if not window.grabWindow().save(str(destination / f'storage-scale-{args.scale}.png')):
+            raise RuntimeError('Failed to save storage preview')
+        QMetaObject.invokeMethod(window.findChild(QObject, 'storageDialog'), 'close')
         QMetaObject.invokeMethod(window.findChild(QObject, 'diagnosticDialog'), 'open')
         for _ in range(30):
             app.processEvents()
