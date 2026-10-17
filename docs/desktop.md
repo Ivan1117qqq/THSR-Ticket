@@ -105,7 +105,7 @@ Get-Content build/package-smoke.json
 
 自我檢查只使用暫存設定、載入兩套 OCR 模型與啟動 Playwright 驅動，沒有連線官網或送出訂位。
 亦提供 Inno Setup 安裝程式：先安裝 Inno Setup 6，再執行 `ISCC.exe installer/TravelDesk.iss`。
-產物為 `dist/installer/TravelDesk-Setup-0.3.2.exe`，可選擇桌面捷徑，安裝至目前使用者的 Programs 目錄。
+產物為 `dist/installer/TravelDesk-Setup-0.3.3.exe`，可選擇桌面捷徑，安裝至目前使用者的 Programs 目錄。
 App 執行中會阻擋升級與解除安裝，不會強制結束訂位。解除安裝不刪除使用者設定與訂位資料。
 目前依使用者選擇交付**未簽章**安裝包；部分系統可能顯示未識別發行者提示。
 
@@ -168,4 +168,4 @@ Windows 新設定預設以目前帳號的 DPAPI 保護身分證與手機。舊�
 
 異常結束後由程序存活檢查處理過期鎖；不要自行刪除執行中 App 的 `desktop-instance.lock`。此鎖與訂位的 `*.state.json` 不同，重新啟動仍保留原有防重送檢查。CLI、舊 Tk 與未更新的 Qt 安裝包不受這個視窗限制；不同設定的 CLI 任務也不會由此合併。
 
-此功能已在原始碼通過離線測試，既有 0.3.2 EXE 尚未更新。
+此功能已整合至 0.3.3 EXE；舊 0.3.2 安裝包不含此功能。

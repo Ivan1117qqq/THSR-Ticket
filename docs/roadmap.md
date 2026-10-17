@@ -1,8 +1,8 @@
 # 後續優化與驗收計畫
 
-檢查日期：2026-10-03；依據倉庫 0.3.2 與後續優化原始碼。第 1 項 CI、第 3 項 Qt 單一實例及第 4 項本次工作階段診斷匯出已完成本機實作與驗證，尚待遠端 Actions 與打包驗收；其他項目仍為待辦。此次沒有更動訂位行為，也沒有操作真實訂位。
+更新日期：2026-10-18；目前版本 0.3.3。第 1 項上次推送的 Windows／Linux CI 已確認成功，第 3、4 項及設定遷移已整合新版安裝包。EXE 自我檢查及不同 AppId 的隔離安裝／覆裝／解除安裝測試通過；正式 AppId 的乾淨 Windows 與官網驗收仍待完成。此次沒有更動訂位行為，也沒有操作真實訂位。
 
-已完成的第一階段：push／PR 新增 Windows Qt 回歸工作、`--require-desktop` 必測檢查、JUnit 報告保存；手動發行工作共用必測檢查，並驗證打包後的 DPAPI 功能。232 項通過、11 項選用測試跳過；缺少整組桌面測試的負向驗證會正確回傳失敗。遠端 CI 與乾淨 Windows 安裝驗收尚未在本輪執行。
+已完成的第一階段：push／PR 的 Windows Qt 回歸、`--require-desktop` 必測檢查與 JUnit 報告保存。最新本機 255 項通過、11 項選用測試跳過；版本與隔離驗收的範圍見 [驗證紀錄](verification.md)。
 
 ## 現況判斷
 
@@ -14,9 +14,9 @@
 
 | 順序 | 現況與待做工作 | 對應程式／設定 | 完成條件 |
 | --- | --- | --- | --- |
-| 1 | 持續桌面回歸已實作並通過本機驗證；遠端驗收待執行。一般 push／PR 現已包含 Windows Qt 工作；完整打包仍手動執行。 | [Python CI](../.github/workflows/pythonpackage.yml)、[桌面 CI](../.github/workflows/desktop-release.yml)、[桌面測試](../thsr_ticket/unittest/test_desktop.py) | PR／push 有 Windows Qt 離線測試；未安裝 Qt 造成的跳過不可被當成桌面通過；發布前留存打包、自我檢查與安裝升級報告。 |
+| 1 | 持續桌面回歸已通過本機及上次推送的遠端驗證。一般 push／PR 現已包含 Windows Qt 工作；完整打包仍手動執行。 | [Python CI](../.github/workflows/pythonpackage.yml)、[桌面 CI](../.github/workflows/desktop-release.yml)、[桌面測試](../thsr_ticket/unittest/test_desktop.py) | PR／push 有 Windows Qt 離線測試；未安裝 Qt 造成的跳過不可被當成桌面通過；發布前留存打包、自我檢查與安裝升級報告。 |
 | 2 | 完成新版 Qt 實站與乾淨 Windows 發行驗收。已有本機測試，但不能以離線 HTML 模擬代表網站相容。 | [驗證紀錄](verification.md)、[安裝測試腳本](../scripts/test_installer.ps1) | 記錄 OS、瀏覽器、版本、執行步驟與結果；先驗查票與停止，再由使用者明確授權測試真實訂位／取消；新版本安裝、升級、解除安裝及資料保留均有證據。 |
-| 3 | 已實作同使用者資料目錄的 Qt 單一實例，通過子程序喚回及崩潰復原測試；打包與人工前景焦點驗收待完成。CLI／舊 Tk 不受視窗鎖限制，同設定操作鎖仍保留。 | [桌面入口](../thsr_ticket/desktop/__main__.py)、[單一實例](../thsr_ticket/desktop/single_instance.py)、[操作鎖](../thsr_ticket/record_lock.py) | 第二次啟動不建立 controller 或任務；僅請求喚回原視窗。原程序無回應時提示，不強制接管；程序退出可再啟動，但待確認訂位仍阻擋重送。 |
+| 3 | 已實作同使用者資料目錄的 Qt 單一實例，通過子程序喚回及崩潰復原測試；已整合 0.3.3 打包，人工前景焦點驗收待完成。CLI／舊 Tk 不受視窗鎖限制，同設定操作鎖仍保留。 | [桌面入口](../thsr_ticket/desktop/__main__.py)、[單一實例](../thsr_ticket/desktop/single_instance.py)、[操作鎖](../thsr_ticket/record_lock.py) | 第二次啟動不建立 controller 或任務；僅請求喚回原視窗。原程序無回應時提示，不強制接管；程序退出可再啟動，但待確認訂位仍阻擋重送。 |
 | 4 | 已實作設定頁診斷預覽與匯出，通過本機測試；限定本次 App 工作階段最近 200 筆簡化事件，尚不讀取歷史執行檔案。 | [診斷資料](../thsr_ticket/diagnostics.py)、[桌面 controller](../thsr_ticket/desktop/controller.py) | 匯出版本、平台、固定錯誤分類及必要階段資訊；匯出前預覽且內容一致；使用允許清單排除個資／原始文字；不得覆寫既有檔案。 |
 | 5 | 設定部分已實作版本 1、舊格式唯讀相容、首次儲存備份與未知版本阻擋；訂位紀錄的通用遷移契約仍待完成。 | [設定儲存](../thsr_ticket/config_store.py)、[自動設定模型](../thsr_ticket/automation.py)、[訂位紀錄](../thsr_ticket/booking_records.py) | 設定升級不修改訂位狀態；備份失敗不覆寫。下一步需定義各紀錄類型版本與遷移方式，並完善 DPAPI 跨帳號復原指引。 |
 | 6 | 提供資料保留與清理介面。已有逐筆封存，但尚無完整的容量、保留期限與批次清理政策。 | [訂位紀錄](../thsr_ticket/booking_records.py)、[執行紀錄](../thsr_ticket/run_records.py)、[主畫面](../thsr_ticket/desktop/qml/Main.qml) | 先顯示可清理數量與範圍，再由使用者確認；不得刪除執行中的紀錄、未解決的防重送狀態；本機清理與官網取消文字清楚區分。 |
@@ -36,4 +36,4 @@
 
 本次修正 README 的重試條件、Qt 紀錄頁名稱、個資保護描述、安裝包取得方式與驗證數字，新增功能到程式碼的導覽。完整逐檔用途位於 [檔案索引](file-inventory.md)，執行流程與設計理由位於 [開發指南](development-guide.md)。
 
-本次沒有宣稱遠端 CI 已通過，也沒有讀取個人設定或訂位資料。新增功能時，請同步更新操作文件、對應的檔案用途、驗收證據與本表狀態；完成後移入驗證紀錄，避免待辦與已完成功能混在一起。
+遠端 CI 成功證據對應上次推送的 `80ab7f9`；0.3.3 版本更新的遠端 CI 結果需另行確認。沒有讀取個人設定或訂位資料。新增功能時，請同步更新操作文件、對應的檔案用途、驗收證據與本表狀態。

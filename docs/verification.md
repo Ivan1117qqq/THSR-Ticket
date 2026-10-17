@@ -1,5 +1,15 @@
 # 專案驗證紀錄
 
+## 0.3.3 發行準備（2026-10-18）
+
+- 已透過 GitHub 公開 API 確認 commit `80ab7f9b18e69b6b283e3c6ff7f3981e4319954d` 的 [CI 執行](https://github.com/Ivan1117qqq/THSR-Ticket/actions/runs/37131353001) 完成且成功：`desktop` Windows 工作與 `build (3.13)` Linux 工作皆通過。這是上次推送的驗證，不代表 0.3.3 版本更新已通過遠端 CI。
+- 本機 0.3.3：255 項通過、11 項選用測試跳過，Flake8 通過。
+- 使用獨立 PyInstaller workpath 建置 EXE，版本資源為 0.3.3；移除 Python 環境變數並限制 PATH 後，自我檢查通過 QML（無警告）、standard／beta OCR、Playwright 驅動與 Windows DPAPI。
+- 本機已存在正式安裝，因此不執行會覆蓋正式 App 的安裝測試。隔離測試包使用相同程式內容及安裝腳本，僅改測試 AppId、名稱、路徑並停用壓縮；測試結果不能視為正式 AppId 在乾淨 Windows 的完整驗收。
+- 隔離驗收通過：執行中阻擋安裝／解除安裝、首次安裝、同版本覆裝、安裝後自我檢查、解除安裝，以及假訂位狀態檔雜湊不變。此處「升級」測試是同版本覆裝，不宣稱已測試所有舊版到新版的資料遷移。
+- 正式未簽章安裝包：`dist/installer/TravelDesk-Setup-0.3.3.exe`，264,117,992 bytes；SHA-256：`3E70F92F5B678E7078364D18334EB9741D4890335EED545EEC0C10C118E60AE0`。旁附 `.sha256` 檔；本機驗證輸出位於 `build/package-smoke-033.json` 與 `build/installer-validation-033.log`，不提交 Git。
+- EXE 自我檢查與安裝測試只使用假資料，沒有查票、訂位或取消。完整官網相容性與乾淨 Windows 發行 workflow 仍待驗收。
+
 ## 設定格式版本（2026-10-03）
 
 最終完整回歸 255 通過、11 項選用測試跳過，Flake8 通過。涵蓋舊設定唯讀載入、原始位元組備份、首次儲存升級、後續不重複備份、未知或不合法版本拒絕覆寫、備份失敗、原子儲存失敗及訂位狀態不變。首次回歸曾有一項額外 Tk 環境跳過；重跑確認僅剩 10 項瀏覽器及 1 項實站選用測試跳過。
