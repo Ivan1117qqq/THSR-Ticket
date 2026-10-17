@@ -608,3 +608,7 @@ requirements-build.txt
 這是介面層的程序協調，不取代 `record_lock.py` 或訂位 state。它不攔截 CLI，也不會把待確認訂位視為可以重送。隔離 `--self-test` 刻意略過此機制。
 
 API 行為參考 [QLockFile](https://doc.qt.io/qtforpython-6/PySide6/QtCore/QLockFile.html) 與 [QLocalServer](https://doc.qt.io/qtforpython-6/PySide6/QtNetwork/QLocalServer.html)。
+
+## 紀錄管理更新（2026-10-18）
+
+最新原始碼已提供紀錄版本 1 相容驗證、GUI 歷史整理預覽及重開後還原。見 [紀錄管理說明](record-storage.md)。整理採可還原移動，未提供永久刪除或保留期限；損壞目前狀態仍保留防重送保護，不能自動推測官網結果。既有 0.3.3 安裝包未重建。

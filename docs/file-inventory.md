@@ -137,6 +137,10 @@
 | [thsr_ticket/model/web/confirm_train.py](../thsr_ticket/model/web/confirm_train.py) | 舊 ConfirmTrain API，由既有相容性測試維護。 |
 | [thsr_ticket/ocr_benchmark.py](../thsr_ticket/ocr_benchmark.py) | 有文件與測試的離線 OCR 評估入口，雖非 App 啟動路徑仍有用途。 |
 | [thsr_ticket/record_lock.py](../thsr_ticket/record_lock.py) | 跨程序操作鎖，序列化同一設定的訂位與封存。 |
+| [thsr_ticket/record_schema.py](../thsr_ticket/record_schema.py) | 訂位紀錄版本驗證與舊格式唯讀相容。 |
+| [thsr_ticket/record_storage.py](../thsr_ticket/record_storage.py) | 歷史執行紀錄預覽、可還原整理與備份搜尋。 |
+| [thsr_ticket/unittest/test_record_storage.py](../thsr_ticket/unittest/test_record_storage.py) | 紀錄版本、防重送保護及整理還原測試。 |
+| [docs/record-storage.md](record-storage.md) | 紀錄整理操作、格式契約與復原限制。 |
 | [thsr_ticket/remote/__init__.py](../thsr_ticket/remote/__init__.py) | 保留套件標記／初始化；Python 匯入與 setuptools 套件發現需要整體判斷，不因內容少就刪除。 |
 | [thsr_ticket/remote/browser_request.py](../thsr_ticket/remote/browser_request.py) | Playwright/Chrome 傳輸，動態填表及頁面快照。 |
 | [thsr_ticket/remote/http_request.py](../thsr_ticket/remote/http_request.py) | requests 傳輸、表單保存及同站 URL 驗證；也供瀏覽器繼承。 |
@@ -184,4 +188,4 @@
 | [thsr_ticket/desktop/qml/TaskPanel.qml](../thsr_ticket/desktop/qml/TaskPanel.qml) | 首頁與進度頁共用狀態卡、階段與復原入口。 |
 | [thsr_ticket/unittest/test_task_status.py](../thsr_ticket/unittest/test_task_status.py) | 狀態優先序、損壞資料、摘要欄位限制與復原路由測試。 |
 
-本次設定格式更新後，本表共 132 個檔案；每個程式碼檔案均有獨立用途列，包含相容入口與測試。設定旁的 `*.task.json` 為本機任務摘要，已加入 Git 忽略清單；不保存個資，也不取代原有防重送紀錄。
+本次設定格式更新後，本表共 136 個檔案；每個程式碼檔案均有獨立用途列，包含相容入口與測試。設定旁的 `*.task.json` 為本機任務摘要，已加入 Git 忽略清單；不保存個資，也不取代原有防重送紀錄。
