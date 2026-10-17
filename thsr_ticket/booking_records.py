@@ -8,6 +8,7 @@ from uuid import uuid4
 
 from thsr_ticket.run_records import timestamp, atomic_json
 from thsr_ticket.record_lock import record_lock
+from thsr_ticket.record_schema import validate_record
 
 
 def record_paths(config_path):
@@ -20,7 +21,7 @@ def read_object(path):
     value = json.loads(path.read_text(encoding='utf-8-sig'))
     if not isinstance(value, dict):
         raise ValueError('紀錄格式必須是 JSON 物件。')
-    return value
+    return validate_record(value)
 
 
 def booking_codes(value):
@@ -147,7 +148,7 @@ def resolve_pending(config_path, outcome, expected_fingerprint, confirmed=False,
             raise ValueError('封存路徑超出紀錄目錄。')
         directory.mkdir(parents=True, exist_ok=False)
         atomic_json(directory / 'resolution.json', {
-            'confirmed_at': timestamp(), 'source': 'user_verified', 'outcome': outcome,
+            '_record_version': 1, 'confirmed_at': timestamp(), 'source': 'user_verified', 'outcome': outcome,
             'booking_code': code.strip() if outcome == 'booked' else '',
         })
         # Original bytes are kept. If the rename fails, the blocking state remains.
@@ -235,7 +236,7 @@ def confirm_cancelled(config_path, code, fingerprint, confirmed=False):
             raise ValueError('封存路徑超出紀錄目錄。')
         directory.mkdir(parents=True, exist_ok=False)
         atomic_json(directory / 'resolution.json', {
-            'confirmed_at': timestamp(), 'source': 'user_verified',
+            '_record_version': 1, 'confirmed_at': timestamp(), 'source': 'user_verified',
             'outcome': 'cancelled', 'booking_code': code,
         })
         state.rename(directory / 'state.json')

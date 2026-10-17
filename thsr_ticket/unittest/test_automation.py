@@ -119,7 +119,7 @@ def test_automatic_booking_and_restart_guard(runner):
     params = runner.client.submit_ticket.call_args.args[0]
     assert params['dummyId'] == runner.config.personal_id
     state = json.loads(runner.state_path.read_text())
-    assert state == {'status': 'booked', 'booking_codes': ['TEST1234']}
+    assert state == {'_record_version': 1, 'status': 'booked', 'booking_codes': ['TEST1234']}
     with pytest.raises(RuntimeError, match='已有訂位'):
         runner.run()
     assert runner.client.request_booking_page.call_count == 1

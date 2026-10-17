@@ -51,7 +51,8 @@ class RunRecords:
         try:
             self.directory.mkdir(parents=True, exist_ok=True)
             with self.events_path.open('a', encoding='utf-8') as handle:
-                handle.write(json.dumps({'time': timestamp(), 'event': event, **fields}, ensure_ascii=False) + '\n')
+                handle.write(json.dumps({'time': timestamp(), 'event': event, **fields,
+                                         '_record_version': 1}, ensure_ascii=False) + '\n')
         except OSError:
             self.disabled = True
             self.output('執行紀錄無法寫入；本次後續紀錄將略過，不會因此重送訂位。')
@@ -59,7 +60,7 @@ class RunRecords:
     def save_result(self, tickets, outbound_date):
         self.directory.mkdir(parents=True, exist_ok=True)
         atomic_json(self.result_path, {
-            'saved_at': timestamp(), 'status': 'booked', 'payment_status': 'unpaid',
+            '_record_version': 1, 'saved_at': timestamp(), 'status': 'booked', 'payment_status': 'unpaid',
             'requested_outbound_date': outbound_date,
             'tickets': [ticket._asdict() for ticket in tickets],
         })

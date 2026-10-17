@@ -341,7 +341,7 @@ class AutomationRunner:
         # Exclusive creation prevents two processes using this config from submitting twice.
         # Keep this marker even if the POST, parsing, or process fails afterwards.
         with self.state_path.open('x', encoding='utf-8') as handle:
-            json.dump({'status': 'submission_pending', 'train_id': selected.id,
+            json.dump({'_record_version': 1, 'status': 'submission_pending', 'train_id': selected.id,
                        'outbound_date': self.config.outbound_date, 'run_id': self.records.run_id}, handle)
             handle.flush()
             os.fsync(handle.fileno())
@@ -365,7 +365,8 @@ class AutomationRunner:
             self.records.event('result_save_failed')
             self.output('訂位已成功，但完整結果無法存檔，請保留上方終端結果；勿重新訂位。')
         try:
-            atomic_json(self.state_path, {'status': 'booked', 'booking_codes': [ticket.id for ticket in tickets]})
+            atomic_json(self.state_path, {'_record_version': 1, 'status': 'booked',
+                                          'booking_codes': [ticket.id for ticket in tickets]})
         except OSError:
             self.records.event('state_update_failed')
             self.output('訂位已成功，但狀態檔更新失敗；原防重送紀錄仍保留，請先確認訂位。')
