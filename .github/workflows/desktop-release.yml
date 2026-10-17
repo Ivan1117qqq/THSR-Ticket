@@ -59,7 +59,7 @@ jobs:
           if (-not ($report.qml -and $report.ocr_standard -and $report.ocr_beta -and $report.playwright_driver -and $report.private_storage)) { throw 'Missing runtime resource' }
       - name: Installer upgrade and uninstall validation
         shell: pwsh
-        run: ./scripts/test_installer.ps1 -Installer dist/installer/TravelDesk-Setup-0.3.2.exe
+        run: ./scripts/test_installer.ps1 -Installer dist/installer/TravelDesk-Setup-0.3.3.exe
       - uses: actions/upload-artifact@v4
         if: always()
         with:
