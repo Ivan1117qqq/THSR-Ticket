@@ -137,6 +137,7 @@
 | [thsr_ticket/model/web/confirm_train.py](../thsr_ticket/model/web/confirm_train.py) | 舊 ConfirmTrain API，由既有相容性測試維護。 |
 | [thsr_ticket/ocr_benchmark.py](../thsr_ticket/ocr_benchmark.py) | 有文件與測試的離線 OCR 評估入口，雖非 App 啟動路徑仍有用途。 |
 | [thsr_ticket/record_lock.py](../thsr_ticket/record_lock.py) | 跨程序操作鎖，序列化同一設定的訂位與封存。 |
+| [thsr_ticket/desktop/storage.py](../thsr_ticket/desktop/storage.py) | 背景紀錄掃描、取消、日期篩選、勾選與備份批次管理。 |
 | [thsr_ticket/record_schema.py](../thsr_ticket/record_schema.py) | 訂位紀錄版本驗證與舊格式唯讀相容。 |
 | [thsr_ticket/record_storage.py](../thsr_ticket/record_storage.py) | 歷史執行紀錄預覽、可還原整理與備份搜尋。 |
 | [thsr_ticket/unittest/test_record_storage.py](../thsr_ticket/unittest/test_record_storage.py) | 紀錄版本、防重送保護及整理還原測試。 |
@@ -188,4 +189,4 @@
 | [thsr_ticket/desktop/qml/TaskPanel.qml](../thsr_ticket/desktop/qml/TaskPanel.qml) | 首頁與進度頁共用狀態卡、階段與復原入口。 |
 | [thsr_ticket/unittest/test_task_status.py](../thsr_ticket/unittest/test_task_status.py) | 狀態優先序、損壞資料、摘要欄位限制與復原路由測試。 |
 
-本次設定格式更新後，本表共 136 個檔案；每個程式碼檔案均有獨立用途列，包含相容入口與測試。設定旁的 `*.task.json` 為本機任務摘要，已加入 Git 忽略清單；不保存個資，也不取代原有防重送紀錄。
+本次設定格式更新後，本表共 137 個檔案；每個程式碼檔案均有獨立用途列，包含相容入口與測試。設定旁的 `*.task.json` 為本機任務摘要，已加入 Git 忽略清單；不保存個資，也不取代原有防重送紀錄。
