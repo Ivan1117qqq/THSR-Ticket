@@ -322,7 +322,6 @@ ApplicationWindow {
                             AppButton {text:'匯出診斷資料'; onClicked:{backend.prepareDiagnostics(); diagnosticDialog.open()}}
                             RowLayout {
                                 AppButton {text:'整理歷史紀錄'; enabled:!backend.running; onClicked:{backend.prepareStorage(); storageDialog.open()}}
-                                AppButton {text:'還原最近整理'; enabled:!backend.running; onClicked:backend.restoreStorage()}
                             }
                             Caption {text:'目前設定位置'}
                             TextEdit {readOnly:true; text:backend.configPath; Layout.fillWidth:true; wrapMode:Text.WrapAnywhere; color:'#30445c'; selectByMouse:true}
@@ -396,16 +395,72 @@ ApplicationWindow {
         }
     }
     Dialog {
-        id:storageDialog; objectName:'storageDialog'; title:'整理歷史紀錄'; anchors.centerIn:parent; modal:true; width:550
+        id:storageDialog; objectName:'storageDialog'; title:'資料管理'; anchors.centerIn:parent; modal:true
+        width:Math.min(850, window.width - 40); height:Math.min(650, window.height - 40)
+        closePolicy:Popup.NoAutoClose
         ColumnLayout {
-            width:parent.width; spacing:16
-            Caption {text:backend.storagePreview}
-            Caption {text:'將已結束的執行紀錄移至本機備份，不釋放磁碟空間，不取消官網訂位。封存狀態、未完成與未知檔案均保留；重開程式後仍可還原最近一次整理。'}
+            anchors.fill:parent; spacing:12
+            Caption {text:backend.storage.message}
+            ProgressBar {Layout.fillWidth:true; indeterminate:true; visible:backend.storage.busy}
             RowLayout {
-                AppButton {text:'返回'; onClicked:storageDialog.close()}
-                AppButton {text:'確認移至備份'; enabled:backend.canCleanStorage; onClicked:{backend.cleanStorage(); storageDialog.close()}}
+                TextField {id:storageAfter; placeholderText:'起日 YYYY-MM-DD'; Layout.preferredWidth:170; enabled:!backend.storage.busy}
+                TextField {id:storageBefore; placeholderText:'迄日 YYYY-MM-DD'; Layout.preferredWidth:170; enabled:!backend.storage.busy}
+                AppButton {text:'篩選'; enabled:!backend.storage.busy; onClicked:backend.storage.filterDates(storageAfter.text,storageBefore.text)}
+                AppButton {text:'重新掃描'; enabled:!backend.storage.busy; onClicked:backend.prepareStorage()}
+            }
+            Caption {text:'日期依紀錄檔最後修改時間；整理僅移至本機備份，不釋放空間或取消官網訂位。'}
+            TabBar {
+                id:storageTabs; objectName:'storageTabs'; Layout.fillWidth:true
+                TabButton {text:'執行紀錄'}
+                TabButton {text:'備份批次'}
+            }
+            StackLayout {
+                currentIndex:storageTabs.currentIndex; Layout.fillWidth:true; Layout.fillHeight:true
+                ListView {
+                    clip:true; model:backend.storage.rows; spacing:4
+                    ScrollBar.vertical:ScrollBar {}
+                    delegate:CheckDelegate {
+                        required property var modelData
+                        width:ListView.view.width
+                        text:modelData.date + '  ·  ' + modelData.bytes + ' bytes\n' + modelData.id
+                        checked:modelData.selected; enabled:!backend.storage.busy
+                        onClicked:backend.storage.select(modelData.id,checked)
+                    }
+                    Label {anchors.centerIn:parent; visible:parent.count === 0; text:backend.storage.busy ? '正在讀取…' : '此範圍沒有可整理紀錄'}
+                }
+                ListView {
+                    clip:true; model:backend.storage.backups; spacing:8
+                    ScrollBar.vertical:ScrollBar {}
+                    delegate:RowLayout {
+                        required property var modelData
+                        width:ListView.view.width
+                        Label {Layout.fillWidth:true; text:modelData.date + '  ·  ' + modelData.count + ' 筆\n' + modelData.id}
+                        AppButton {text:'還原此批次'; enabled:!backend.storage.busy; onClicked:{restoreBatchDialog.batchId=modelData.id; restoreBatchDialog.open()}}
+                    }
+                    Label {anchors.centerIn:parent; visible:parent.count === 0; text:'沒有可還原的備份批次'}
+                }
+            }
+            Caption {text:backend.storage.selectionSummary; visible:storageTabs.currentIndex === 0}
+            RowLayout {
+                AppButton {text:'返回'; enabled:!backend.storage.busy; onClicked:storageDialog.close()}
+                AppButton {text:'取消掃描'; visible:backend.storage.scanning; onClicked:backend.storage.cancel()}
+                AppButton {text:'全選篩選結果'; visible:storageTabs.currentIndex === 0; enabled:!backend.storage.busy; onClicked:backend.storage.selectVisible(true)}
+                AppButton {text:'清除勾選'; visible:storageTabs.currentIndex === 0; enabled:!backend.storage.busy; onClicked:backend.storage.selectVisible(false)}
+                AppButton {text:'整理所選'; visible:storageTabs.currentIndex === 0; enabled:!backend.storage.busy && backend.storage.selectedCount > 0; onClicked:moveBatchDialog.open()}
             }
         }
+    }
+    Dialog {
+        id:moveBatchDialog; title:'確認整理'; anchors.centerIn:parent; modal:true; width:430
+        standardButtons:Dialog.Ok | Dialog.Cancel
+        Label {text:backend.storage.selectionSummary + '\n將移至可還原備份，官網訂位不變。'}
+        onAccepted:backend.storage.moveSelected()
+    }
+    Dialog {
+        id:restoreBatchDialog; property string batchId:''; title:'確認還原'; anchors.centerIn:parent; modal:true; width:450
+        standardButtons:Dialog.Ok | Dialog.Cancel
+        Label {text:'還原此批次所有紀錄？\n' + restoreBatchDialog.batchId + '\n若已有同名紀錄，會停止且不覆寫。'}
+        onAccepted:backend.storage.restoreBatch(batchId)
     }
     Dialog {
         id:unsavedDialog; title:'尚有未儲存的變更'; anchors.centerIn:parent; modal:true; width:490

@@ -24,7 +24,7 @@ from thsr_ticket.desktop.preferences import Preferences
 from thsr_ticket.desktop.updates import check_release, RELEASES
 from thsr_ticket.version import VERSION
 from thsr_ticket.diagnostics import safe_event, snapshot
-from thsr_ticket.record_storage import inventory, move_history, restore_history, latest_backup
+from thsr_ticket.desktop.storage import StorageManager
 from thsr_ticket.task_status import load_task, save_task, booking_guard, task_view
 
 
@@ -97,10 +97,10 @@ class DesktopController(QObject):
         self._log = ''
         self._diagnostic_events = deque(maxlen=200)
         self._diagnostic_preview = ''
-        self._storage_items = []
-        self._storage_config = None
-        self._storage_message = ''
-        self._history_backup = None
+        self._storage = StorageManager(self)
+        self._storage.changed.connect(self.changed.emit)
+        self._storage.mutated.connect(self.refresh)
+        self._storage_closing = False
         self._error = False
         self._issues = {}
         self._match = {}
@@ -127,59 +127,14 @@ class DesktopController(QObject):
     def diagnosticPreview(self):
         return self._diagnostic_preview
 
-    @Property(str, notify=changed)
-    def storagePreview(self):
-        return self._storage_message
-
-    @Property(bool, notify=changed)
-    def canCleanStorage(self):
-        return bool(self._storage_items) and not self._running and self.path == self._storage_config
+    @Property(QObject, constant=True)
+    def storage(self):
+        return self._storage
 
     @Slot()
     def prepareStorage(self):
-        self._storage_items = []
-        self._storage_config = self.path
-        try:
-            if self._running:
-                raise ValueError('請先停止任務。')
-            self._storage_items = inventory(self.path)
-            total = sum(item['bytes'] for item in self._storage_items)
-            self._storage_message = f'可移至備份：{len(self._storage_items)} 筆執行紀錄，共 {total:,} bytes。'
-            if record_paths(self.path)[0].exists():
-                self._storage_message = '目前有訂位或待確認狀態，請先在「我的訂位」核對並封存。'
-        except (OSError, ValueError):
-            self._storage_message = '無法讀取紀錄，請確認任務已停止與資料夾權限。'
-        self.changed.emit()
-
-    @Slot()
-    def cleanStorage(self):
-        if self._running or self.path != self._storage_config:
-            self.notify('設定或任務已變更，請重新預覽。', True)
-            return
-        try:
-            self._history_backup = (self.path, move_history(self.path, self._storage_items))
-            self._storage_items = []
-            self.refresh()
-            self.notify('歷史紀錄已移至備份；官網訂位不變，可還原最近一次整理。')
-        except (OSError, ValueError, RuntimeError):
-            self.notify('無法整理，請停止任務並重新預覽；請保留備份與原始紀錄。', True)
-
-    @Slot()
-    def restoreStorage(self):
-        if self._running:
-            self.notify('請先停止任務。', True)
-            return
-        try:
-            backup = latest_backup(self.path)
-            if backup is None:
-                self.notify('此設定沒有可還原的整理紀錄。')
-                return
-            restore_history(self.path, backup)
-            self._history_backup = None
-            self.refresh()
-            self.notify('歷史紀錄已還原。')
-        except (OSError, ValueError, RuntimeError):
-            self.notify('還原未完成，請保留備份並確認紀錄位置與權限。', True)
+        if not self._running:
+            self._storage.begin(self.path)
 
     @Slot()
     def prepareDiagnostics(self):
@@ -320,7 +275,7 @@ class DesktopController(QObject):
 
     @Property(bool, notify=changed)
     def running(self):
-        return self._running
+        return self._running or self._storage.busy
 
     @Property(bool, notify=changed)
     def error(self):
@@ -367,7 +322,7 @@ class DesktopController(QObject):
             self.formChanged.emit()
 
     def load_path(self, path):
-        if self._running:
+        if self._running or self._storage.busy:
             return False
         try:
             raw = json.loads(Path(path).read_text(encoding='utf-8-sig'))
@@ -398,7 +353,7 @@ class DesktopController(QObject):
 
     @Slot()
     def load(self):
-        if self._running:
+        if self._running or self._storage.busy:
             return
         if self.dirty:
             self.confirmRequested.emit('load')
@@ -446,7 +401,7 @@ class DesktopController(QObject):
 
     @Slot()
     def save(self):
-        if self._running:
+        if self._running or self._storage.busy:
             return
         try:
             self.save_config()
@@ -458,7 +413,7 @@ class DesktopController(QObject):
 
     @Slot()
     def saveAs(self):
-        if self._running:
+        if self._running or self._storage.busy:
             return
         # Do not detach the active state from its config by silently copying just JSON.
         if record_paths(self.path)[0].exists():
@@ -480,7 +435,7 @@ class DesktopController(QObject):
 
     @Slot(bool)
     def start(self, query_only):
-        if self._running:
+        if self._running or self._storage.busy:
             return
         if not query_only and record_paths(self.path)[0].exists():
             self.navigate(3)
@@ -521,7 +476,11 @@ class DesktopController(QObject):
 
     @Slot()
     def requestClose(self):
-        if self._running:
+        if self._storage.busy:
+            self._storage_closing = True
+            self._storage.cancel()
+            return
+        if self._running or self._storage.busy:
             self._closing = True
             self.stop()
         elif self.dirty:
@@ -531,7 +490,7 @@ class DesktopController(QObject):
 
     @Slot(str, str)
     def confirmAction(self, action, decision):
-        if self._running or action not in ('close', 'load') or decision not in ('save', 'discard'):
+        if self.running or action not in ('close', 'load') or decision not in ('save', 'discard'):
             return
         if decision == 'save':
             try:
@@ -553,6 +512,9 @@ class DesktopController(QObject):
 
     @Slot()
     def poll(self):
+        if self._storage_closing and not self._storage.busy:
+            self._storage_closing = False
+            self.requestClose()
         dirty = False
         while not self._messages.empty():
             kind, value = self._messages.get_nowait()
@@ -630,7 +592,7 @@ class DesktopController(QObject):
 
     @Slot(str)
     def archive(self, code):
-        if self._running:
+        if self._running or self._storage.busy:
             return
         try:
             archive_booking(self.path, code, output=io.StringIO())
@@ -641,7 +603,7 @@ class DesktopController(QObject):
 
     @Slot(str, str, str, bool)
     def resolve(self, fingerprint, outcome, code, confirmed):
-        if self._running:
+        if self._running or self._storage.busy:
             return
         try:
             resolve_pending(self.path, outcome, fingerprint, confirmed=confirmed, code=code)
@@ -667,7 +629,7 @@ class DesktopController(QObject):
 
     @Slot(str, str, bool)
     def confirmCancellation(self, code, fingerprint, confirmed):
-        if self._running:
+        if self._running or self._storage.busy:
             return
         try:
             confirm_cancelled(self.path, code, fingerprint, confirmed)

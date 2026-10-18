@@ -77,3 +77,26 @@ def test_legacy_record_is_not_rewritten(tmp_path):
     path.write_bytes(b'{"status": "booked"}')
     assert read_object(path)['status'] == 'booked'
     assert path.read_bytes() == b'{"status": "booked"}'
+
+
+def test_only_selected_records_move(tmp_path):
+    config, _, directory = fixture_run(tmp_path)
+    other = directory.parent / ('b' * 32)
+    other.mkdir()
+    (other / 'events.jsonl').write_bytes(b'{"event":"run_finished"}\n')
+    selected = [item for item in inventory(config) if item['id'] == directory.name]
+    backup = move_history(config, selected)
+    assert not directory.exists()
+    assert other.exists()
+    assert [p.name for p in backup.iterdir()] == [directory.name]
+
+
+def test_cancelled_scan_never_moves_records(tmp_path):
+    import threading
+    from thsr_ticket.record_storage import ScanCancelled
+    config, _, directory = fixture_run(tmp_path)
+    cancel = threading.Event()
+    cancel.set()
+    with pytest.raises(ScanCancelled):
+        inventory(config, cancel)
+    assert directory.exists()

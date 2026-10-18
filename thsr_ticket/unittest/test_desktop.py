@@ -57,6 +57,12 @@ def test_diagnostic_preview_exports_exact_snapshot_without_overwrite(controller,
     assert target.read_text() == 'existing'
 
 
+def finish_storage(controller):
+    controller.storage._thread.join(timeout=5)
+    assert not controller.storage._thread.is_alive()
+    controller.storage.poll()
+
+
 def test_storage_preview_and_restore(controller):
     from thsr_ticket.booking_records import record_paths
     _, runs = record_paths(controller.path)
@@ -64,24 +70,85 @@ def test_storage_preview_and_restore(controller):
     directory.mkdir(parents=True)
     (directory / 'events.jsonl').write_bytes(b'{"event":"run_finished"}\n')
     controller.prepareStorage()
-    assert len(controller._storage_items) == 1
-    controller.cleanStorage()
+    finish_storage(controller)
+    assert len(controller.storage.rows) == 1
+    controller.storage.selectVisible(True)
+    controller.storage.moveSelected()
+    finish_storage(controller)
     assert not directory.exists()
-    controller._history_backup = None  # Simulate loss of in-memory state after restart.
-    controller.restoreStorage()
-    assert directory.exists()
-
-
-def test_storage_cannot_clean_after_config_switch(controller):
-    from thsr_ticket.booking_records import record_paths
-    _, runs = record_paths(controller.path)
-    directory = runs / ('a' * 32)
-    directory.mkdir(parents=True)
-    (directory / 'events.jsonl').write_bytes(b'{"event":"run_finished"}\n')
     controller.prepareStorage()
-    controller.path = controller.path.with_name('other.json')
-    controller.cleanStorage()
+    finish_storage(controller)
+    controller.storage.restoreBatch(controller.storage.backups[0]['id'])
+    finish_storage(controller)
     assert directory.exists()
+
+
+def test_storage_work_blocks_booking(controller):
+    controller.storage._busy = True
+    controller.start(True)
+    controller.worker.assert_not_called()
+    assert controller.running
+    controller.storage._busy = False
+
+
+def test_storage_filters_clear_hidden_selection(controller):
+    manager = controller.storage
+    manager.items = [{'id': 'a', 'date': '2026-10-01 12:00:00', 'bytes': 10},
+                     {'id': 'b', 'date': '2026-10-18 12:00:00', 'bytes': 20}]
+    manager.selectVisible(True)
+    assert manager.selectedCount == 2
+    manager.filterDates('2026-10-10', '2026-10-18')
+    assert manager.selectedCount == 0
+    assert [item['id'] for item in manager.rows] == ['b']
+    manager.selectVisible(True)
+    assert manager.selected == {'b'}
+    manager.filterDates('bad', '')
+    assert [item['id'] for item in manager.rows] == ['b']
+
+
+def test_storage_scan_runs_off_ui_thread_and_cancels(controller, monkeypatch):
+    import threading
+    from thsr_ticket.record_storage import ScanCancelled
+    entered = threading.Event()
+    thread_ids = []
+
+    def scan(config, cancel, progress):
+        thread_ids.append(threading.get_ident())
+        entered.set()
+        assert cancel.wait(timeout=5)
+        raise ScanCancelled()
+
+    monkeypatch.setattr('thsr_ticket.desktop.storage.inventory', scan)
+    controller.prepareStorage()
+    assert entered.wait(timeout=5)
+    assert controller.storage.busy
+    assert thread_ids != [threading.get_ident()]
+    controller.storage.cancel()
+    finish_storage(controller)
+    assert not controller.storage.busy
+    assert controller.storage.rows == []
+
+
+def test_storage_late_cancel_discards_scan_result(controller):
+    controller.prepareStorage()
+    controller.storage._thread.join(timeout=5)
+    controller.storage.cancel()
+    controller.storage.poll()
+    assert controller.storage.rows == []
+    assert not controller.storage.busy
+
+
+def test_close_waits_for_storage_work(controller):
+    from unittest.mock import Mock
+    closed = Mock()
+    controller.closeReady.connect(closed)
+    controller._saved_form = dict(controller._form)
+    controller.storage._busy = True
+    controller.requestClose()
+    closed.assert_not_called()
+    controller.storage._busy = False
+    controller.poll()
+    closed.assert_called_once()
 
 
 def test_diagnostic_cancel_and_config_destination_are_safe(controller, tmp_path, monkeypatch):

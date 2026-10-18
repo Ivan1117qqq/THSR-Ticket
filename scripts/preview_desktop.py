@@ -57,12 +57,28 @@ def main():
             if not frame.save(str(destination / f'page-{page}-scale-{args.scale}.png')):
                 raise RuntimeError('Failed to save preview')
         controller.prepareDiagnostics()
+        from thsr_ticket.booking_records import record_paths
+        _, preview_runs = record_paths(controller.path)
+        for identifier in ('a' * 32, 'b' * 32):
+            directory = preview_runs / identifier
+            directory.mkdir(parents=True)
+            (directory / 'events.jsonl').write_bytes(b'{"event":"run_finished"}\n')
+        batch = preview_runs.parent / (preview_runs.name + '.history-backups') / ('c' * 32) / ('d' * 32)
+        batch.mkdir(parents=True)
+        (batch / 'events.jsonl').write_bytes(b'{"event":"run_finished"}\n')
         controller.prepareStorage()
+        controller.storage._thread.join(timeout=5)
+        controller.storage.poll()
         QMetaObject.invokeMethod(window.findChild(QObject, 'storageDialog'), 'open')
         for _ in range(30):
             app.processEvents()
         if not window.grabWindow().save(str(destination / f'storage-scale-{args.scale}.png')):
             raise RuntimeError('Failed to save storage preview')
+        window.findChild(QObject, 'storageTabs').setProperty('currentIndex', 1)
+        for _ in range(30):
+            app.processEvents()
+        if not window.grabWindow().save(str(destination / f'backups-scale-{args.scale}.png')):
+            raise RuntimeError('Failed to save backup preview')
         QMetaObject.invokeMethod(window.findChild(QObject, 'storageDialog'), 'close')
         QMetaObject.invokeMethod(window.findChild(QObject, 'diagnosticDialog'), 'open')
         for _ in range(30):
