@@ -14,6 +14,7 @@ from PySide6 import QtSvg  # noqa: F401 - include SVG icon plugin in the desktop
 
 from thsr_ticket.desktop.controller import DesktopController
 from thsr_ticket.desktop.single_instance import SingleInstance, activate_window
+from thsr_ticket.desktop.notifications import DesktopNotifications
 from thsr_ticket.version import VERSION
 
 
@@ -66,6 +67,19 @@ def run_app(args, app, instance):
         return 1
     if instance:
         instance.activated.connect(lambda: activate_window(engine.rootObjects()[0]))
+    notifications = None
+    if not args.self_test:
+        notifications = DesktopNotifications(app.windowIcon(), app)
+        controller.set_notification_support(notifications.available)
+        notifications.set_enabled(controller.notificationsEnabled)
+        controller.notificationsChanged.connect(notifications.set_enabled)
+        controller.desktopNotification.connect(notifications.publish)
+
+        def open_notification(target):
+            controller.openNotification(target)
+            activate_window(engine.rootObjects()[0])
+
+        notifications.opened.connect(open_notification)
     if args.self_test:
         from thsr_ticket.captcha import CaptchaReader
         from playwright.sync_api import sync_playwright
@@ -97,6 +111,8 @@ def run_app(args, app, instance):
             and not warnings and 'error_type' not in report else 1
     controller.closeReady.connect(app.quit)
     result = app.exec()
+    if notifications:
+        notifications.set_enabled(False)
     if mutex:
         close_handle = ctypes.windll.kernel32.CloseHandle
         close_handle.argtypes = (wintypes.HANDLE,)

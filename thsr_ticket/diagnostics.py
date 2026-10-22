@@ -7,11 +7,12 @@ from thsr_ticket.task_status import CODES
 from thsr_ticket.version import VERSION
 
 EVENTS = {'stage', 'attempt_finished', 'run_started', 'run_stopped', 'run_finished',
-          'ocr', 'result_save_failed', 'state_update_failed'}
+          'ocr', 'result_save_failed', 'state_update_failed', 'task_completed'}
 PHASES = {'prepare', 'schedule', 'homepage', 'captcha_image', 'ocr', 'query',
-          'select_train', 'submit_ticket', 'parse_result'}
+          'select_train', 'submit_ticket', 'parse_result', 'preflight', 'browser_start', 'ocr_load'}
 REASONS = {'interrupted', 'booking_unconfirmed', 'network_timeout', 'http_error', 'network_error',
-           'website_rejected', 'ocr_unavailable', 'invalid_response_or_config', 'operation_failed'}
+           'website_rejected', 'ocr_unavailable', 'invalid_response_or_config', 'operation_failed',
+           'preflight', 'browser_start', 'ocr_load', 'network', 'stopped'}
 
 
 def allowed(value, choices):
@@ -32,7 +33,7 @@ def safe_event(value):
         if allowed(value.get(key), choices):
             result[key] = value[key]
     elapsed = value.get('elapsed_ms')
-    if type(elapsed) in (int, float) and math.isfinite(elapsed) and 0 <= elapsed <= 86400000:
+    if type(elapsed) in (int, float) and 0 <= elapsed <= 86400000 and math.isfinite(elapsed):
         result['elapsed_ms'] = round(elapsed, 3)
     return result
 

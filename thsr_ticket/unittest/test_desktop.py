@@ -41,6 +41,171 @@ def controller(qt, tmp_path):
     controller.storage._timer.stop()
     controller._record_loader.cancel()
     finish_records(controller)
+    controller._history.cancel()
+    finish_history(controller)
+
+
+def finish_history(controller):
+    manager = controller._history
+    for _ in range(10):
+        if not manager.busy:
+            break
+        if manager._thread is not None:
+            manager._thread.join(timeout=5)
+            assert not manager._thread.is_alive()
+        manager.poll()
+    assert not manager.busy
+
+
+def test_history_snapshot_is_frozen_and_exportable_after_restart(controller, tmp_path, monkeypatch):
+    from thsr_ticket.unittest.test_history_diagnostics import write_events
+    from thsr_ticket.booking_records import record_paths
+    _, runs = record_paths(controller.path)
+    path = write_events(runs / ('a' * 32) / 'events.jsonl', [
+        {'event': 'stage', 'phase': 'query'},
+        {'event': 'task_completed', 'outcome': 'network', 'message': 'PRIVATE'},
+    ])
+    controller.prepareHistory()
+    finish_history(controller)
+    manager = controller.historyDiagnostics
+    assert len(manager.rows) == 1
+    manager.select(manager.rows[0]['id'])
+    assert controller.prepareHistoricalDiagnostics()
+    preview = controller.diagnosticPreview
+    assert 'PRIVATE' not in preview
+    assert json.loads(preview)['outcome'] == 'network'
+    path.unlink()
+    target = tmp_path / 'history.diagnostics.json'
+    monkeypatch.setattr('thsr_ticket.desktop.controller.QFileDialog.getSaveFileName',
+                        lambda *args: (str(target), ''))
+    controller.exportDiagnostics()
+    assert target.read_text(encoding='utf-8') == preview + '\n'
+    controller.path = tmp_path / 'different.json'
+    assert not controller.prepareHistoricalDiagnostics()
+
+
+def test_history_stale_config_is_discarded_and_close_waits(controller, monkeypatch):
+    import threading
+    from thsr_ticket.scan_report import ScanCancelled
+    entered = threading.Event()
+    calls = []
+
+    def scan(config, cancel):
+        calls.append(config)
+        if len(calls) == 1:
+            entered.set()
+            assert cancel.wait(timeout=5)
+            raise ScanCancelled()
+        return [], {}, {'accepted': 0, 'skipped': 0, 'failed': 0, 'not_loaded': 0}
+
+    monkeypatch.setattr('thsr_ticket.desktop.history.scan_history', scan)
+    controller.prepareHistory()
+    assert entered.wait(timeout=5)
+    controller.path = controller.path.with_name('other.json')
+    controller.prepareHistory()
+    finish_history(controller)
+    assert calls[-1] == controller.path and len(calls) == 2
+    assert controller.historyDiagnostics.rows == []
+    entered.clear()
+    calls.clear()
+    controller.prepareHistory()
+    assert entered.wait(timeout=5)
+    controller._saved_form = dict(controller._form)
+    closed = []
+    controller.closeReady.connect(lambda: closed.append(True))
+    controller.requestClose()
+    assert not closed
+    finish_history(controller)
+    controller.poll()
+    finish_records(controller)
+    controller.poll()
+    assert closed == [True]
+
+
+def test_notification_preference_survives_config_remember_and_failure(controller, monkeypatch):
+    assert not controller.notificationsEnabled
+    controller.setNotifications(True)
+    controller.preferences.remember(controller.path)
+    assert controller.preferences.read()['desktop_notifications'] is True
+    previous = controller.preferences.read()['last_config']
+    controller.setNotifications(False)
+    assert controller.preferences.read()['last_config'] == previous
+    monkeypatch.setattr(controller.preferences, 'notifications', Mock(side_effect=PermissionError()))
+    controller.setNotifications(True)
+    assert not controller.notificationsEnabled
+    assert controller.error
+
+
+def test_task_notifications_emit_once_after_worker_join_and_respect_opt_out(controller):
+    import threading
+    delivered = []
+    controller.desktopNotification.connect(lambda *args: delivered.append(args))
+    controller.poll()  # Merely opening the App does not replay a past notification.
+    assert not delivered
+    controller._query_only = True
+    controller._notifications_enabled = True
+    controller._running = True
+    release = threading.Event()
+    controller._thread = threading.Thread(target=lambda: release.wait(timeout=5))
+    controller._thread.start()
+    controller._messages.put(('completion', {'code': 'success', 'action': ''}))
+    controller._messages.put(('done', 'complete'))
+    try:
+        controller.poll()
+        assert not delivered and controller.running
+    finally:
+        release.set()
+        controller._thread.join(timeout=5)
+    controller.poll()
+    controller.poll()
+    assert len(delivered) == 1 and delivered[0][2] == 'progress'
+    controller._notification_emitted = False
+    controller._notifications_enabled = False
+    controller.notify_task_finished()
+    assert len(delivered) == 1
+    controller.openNotification('records')
+    assert controller.page == 3
+    controller.openNotification('invalid')
+    assert controller.page == 3
+
+
+@pytest.mark.parametrize('code,query_only,guard,phase,title,target', [
+    ('success', True, 'booked', 'query', '查票完成', 'progress'),
+    ('success', False, 'booked', 'submit_ticket', '訂位成功 · 尚未付款', 'records'),
+    ('success', False, 'pending', 'submit_ticket', '訂位結果待確認', 'records'),
+    ('network', False, '', 'submit_ticket', '訂位結果待確認', 'records'),
+    ('network', True, 'pending', 'query', '任務執行失敗', 'progress'),
+    ('stopped', False, '', 'query', '', ''),
+])
+def test_notification_policy(code, query_only, guard, phase, title, target):
+    from thsr_ticket.desktop.notifications import task_notification
+    result = task_notification(code, query_only, guard, phase)
+    if result:
+        assert (result['title'], result['target']) == (title, target)
+    else:
+        assert (title, target) == ('', '')
+
+
+def test_notification_adapter_never_sends_when_disabled_or_unavailable(qt):
+    from PySide6.QtGui import QIcon
+    from thsr_ticket.desktop.notifications import DesktopNotifications
+    tray = Mock()
+    adapter = DesktopNotifications(QIcon(), tray_factory=lambda *args: tray)
+    adapter.available = True
+    opened = []
+    adapter.opened.connect(opened.append)
+    adapter.publish('fixed title', 'fixed body', 'records')
+    tray.showMessage.assert_not_called()
+    adapter.set_enabled(True)
+    adapter.publish('fixed title', 'fixed body', 'records')
+    tray.showMessage.assert_called_once()
+    tray.messageClicked.connect.call_args.args[0]()
+    assert opened == ['records']
+    adapter.available = False
+    adapter.publish('fixed title', 'fixed body', 'progress')
+    assert tray.showMessage.call_count == 1
+    adapter.set_enabled(False)
+    tray.setVisible.assert_called_with(False)
 
 
 def finish_records(controller):
@@ -627,6 +792,25 @@ def test_qml_pages_render_without_errors(qt, controller, tmp_path):
     controller.navigate(1)
     qt.processEvents()
     assert not root.grabWindow().isNull()
+    from thsr_ticket.unittest.test_history_diagnostics import write_events
+    from thsr_ticket.booking_records import record_paths
+    _, runs = record_paths(controller.path)
+    write_events(runs / ('d' * 32) / 'events.jsonl', [
+        {'event': 'stage', 'phase': 'query'}, {'event': 'task_completed', 'outcome': 'network'}])
+    controller.prepareHistory()
+    finish_history(controller)
+    controller.historyDiagnostics.select(controller.historyDiagnostics.rows[0]['id'])
+    history = root.findChild(QObject, 'historyDiagnosticsDialog')
+    assert QMetaObject.invokeMethod(history, 'open')
+    for _ in range(5):
+        qt.processEvents()
+    assert not root.grabWindow().isNull()
+    assert controller.prepareHistoricalDiagnostics()
+    dialog = root.findChild(QObject, 'diagnosticDialog')
+    QMetaObject.invokeMethod(dialog, 'open')
+    qt.processEvents()
+    QMetaObject.invokeMethod(dialog, 'close')
+    QMetaObject.invokeMethod(history, 'close')
     assert not warnings
     root.setProperty('allowClose', True)
     root.close()

@@ -345,10 +345,18 @@ ApplicationWindow {
                         Item {height:8}
                         Card {
                             Layout.fillWidth:true; Layout.leftMargin:28; Layout.rightMargin:28; title:'設定與資料'
-                            AppButton {text:'匯出診斷資料'; onClicked:{backend.prepareDiagnostics(); diagnosticDialog.open()}}
+                            RowLayout {
+                                AppButton {text:'本次診斷匯出'; onClicked:{backend.prepareDiagnostics(); diagnosticDialog.open()}}
+                                AppButton {text:'歷史任務診斷'; onClicked:{backend.prepareHistory(); historyDialog.open()}}
+                            }
                             RowLayout {
                                 AppButton {text:'整理歷史紀錄'; enabled:!backend.running; onClicked:{backend.prepareStorage(); storageDialog.open()}}
                             }
+                            CheckBox {
+                                text:'任務結束時顯示桌面通知'; checked:backend.notificationsEnabled
+                                onClicked:backend.setNotifications(checked)
+                            }
+                            Caption {text:backend.notificationsAvailable ? '預設關閉。通知不包含行程或個資；點擊可回到任務進度或我的訂位。Windows 勿擾模式可能隱藏通知，關閉 App 後不會繼續執行。' : '目前系統不支援桌面通知。偏好仍會保存，可在支援的環境使用。'}
                             Caption {text:'目前設定位置'}
                             TextEdit {readOnly:true; text:backend.configPath; Layout.fillWidth:true; wrapMode:Text.WrapAnywhere; color:'#30445c'; selectByMouse:true}
                             RowLayout {
@@ -405,10 +413,14 @@ ApplicationWindow {
             }
         }
     }
+    HistoryDialog {
+        id:historyDialog; objectName:'historyDiagnosticsDialog'; backend:window.backend; anchors.centerIn:parent
+        onPreviewRequested:if(backend.prepareHistoricalDiagnostics()) diagnosticDialog.open()
+    }
     Dialog {
-        id:diagnosticDialog; objectName:'diagnosticDialog'; title:'診斷資料預覽'; anchors.centerIn:parent; modal:true; width:600
+        id:diagnosticDialog; objectName:'diagnosticDialog'; title:'診斷資料預覽'; anchors.centerIn:parent; modal:true; width:Math.min(600, window.width - 40)
         contentItem:ColumnLayout {
-            Caption {text:'包含本次開啟 App 後最近 200 筆簡化事件與狀態，不含個資、訂位代碼或完整日誌。重開 App 後不載入歷史事件。'}
+            Caption {text:backend.diagnosticDescription}
             ScrollView {
                 Layout.fillWidth:true; Layout.preferredHeight:300; clip:true
                 TextArea {text:backend.diagnosticPreview; readOnly:true; selectByMouse:true; wrapMode:TextEdit.WrapAnywhere}

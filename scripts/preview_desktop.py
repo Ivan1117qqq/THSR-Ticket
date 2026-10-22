@@ -3,6 +3,7 @@
 Run from repository root: python -m scripts.preview_desktop --scale 1.25
 """
 import argparse
+import json
 import os
 import tempfile
 from pathlib import Path
@@ -123,6 +124,31 @@ def main():
         if not window.grabWindow().save(str(destination / f'diagnostics-scale-{args.scale}.png')):
             raise RuntimeError('Failed to save diagnostics preview')
         QMetaObject.invokeMethod(window.findChild(QObject, 'diagnosticDialog'), 'close')
+        history_path = preview_runs / ('3' * 32) / 'events.jsonl'
+        history_path.parent.mkdir()
+        demo_events = [
+            {'event': 'run_started', 'app_version': '0.4.0', 'query_only': True},
+            {'event': 'stage', 'phase': 'query'},
+            {'event': 'task_completed', 'outcome': 'network', 'phase': 'query'},
+        ]
+        history_path.write_text(''.join(json.dumps(event) + '\n' for event in demo_events), encoding='utf-8')
+        controller.prepareHistory()
+        controller.historyDiagnostics._thread.join(timeout=5)
+        controller.historyDiagnostics.poll()
+        controller.historyDiagnostics.select('runs/' + '3' * 32)
+        QMetaObject.invokeMethod(window.findChild(QObject, 'historyDiagnosticsDialog'), 'open')
+        for _ in range(30):
+            app.processEvents()
+        if not window.grabWindow().save(str(destination / f'history-scale-{args.scale}.png')):
+            raise RuntimeError('Failed to save history preview')
+        controller.prepareHistoricalDiagnostics()
+        QMetaObject.invokeMethod(window.findChild(QObject, 'diagnosticDialog'), 'open')
+        for _ in range(30):
+            app.processEvents()
+        if not window.grabWindow().save(str(destination / f'history-export-scale-{args.scale}.png')):
+            raise RuntimeError('Failed to save history export preview')
+        QMetaObject.invokeMethod(window.findChild(QObject, 'diagnosticDialog'), 'close')
+        QMetaObject.invokeMethod(window.findChild(QObject, 'historyDiagnosticsDialog'), 'close')
         controller.navigate(3)
         while controller._record_loader.busy:
             controller._record_loader._thread.join(timeout=5)

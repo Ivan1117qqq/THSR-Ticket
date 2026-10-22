@@ -2,9 +2,11 @@
 import json
 import os
 import tempfile
+import platform
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
+from thsr_ticket.version import VERSION
 
 
 def timestamp():
@@ -41,6 +43,8 @@ class RunRecords:
         self.output = output
 
     def event(self, event, **fields):
+        if event == 'run_started':
+            fields.update(app_version=VERSION, python_version=platform.python_version(), platform=platform.system())
         if self.event_sink is not None:
             try:
                 self.event_sink({'event': event, **fields})

@@ -17,4 +17,15 @@ class Preferences:
 
     def remember(self, config_path):
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        atomic_json(self.path, {'last_config': str(Path(config_path).resolve())})
+        data = self._known()
+        atomic_json(self.path, {**data, 'last_config': str(Path(config_path).resolve())})
+
+    def _known(self):
+        data = self.read()
+        return {key: value for key, value in data.items()
+                if (key == 'last_config' and isinstance(value, str))
+                or (key == 'desktop_notifications' and type(value) is bool)}
+
+    def notifications(self, enabled):
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        atomic_json(self.path, {**self._known(), 'desktop_notifications': bool(enabled)})

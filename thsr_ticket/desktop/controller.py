@@ -26,6 +26,8 @@ from thsr_ticket.version import VERSION
 from thsr_ticket.diagnostics import safe_event, snapshot
 from thsr_ticket.desktop.storage import StorageManager
 from thsr_ticket.desktop.record_loader import RecordLoader
+from thsr_ticket.desktop.history import HistoryDiagnostics
+from thsr_ticket.desktop.notifications import task_notification
 from thsr_ticket.task_status import load_task, save_task, booking_guard, task_view
 
 
@@ -70,12 +72,17 @@ class DesktopController(QObject):
     resetSecrets = Signal()
     confirmRequested = Signal(str)
     storageRecoveryDetected = Signal()
+    desktopNotification = Signal(str, str, str)
+    notificationsChanged = Signal(bool)
 
     def __init__(self, data_dir, worker=run_background):
         super().__init__()
         self.data_dir = Path(data_dir)
         self.path = self.data_dir / 'booking.local.json'
         self.preferences = Preferences(self.data_dir)
+        self._notifications_enabled = self.preferences.read().get('desktop_notifications') is True
+        self._notification_available = False
+        self._notification_emitted = False
         previous = self.preferences.read().get('last_config')
         if isinstance(previous, str) and Path(previous).is_absolute():
             self.path = Path(previous)
@@ -104,6 +111,10 @@ class DesktopController(QObject):
         self._log = ''
         self._diagnostic_events = deque(maxlen=200)
         self._diagnostic_preview = ''
+        self._diagnostic_scope = 'session'
+        self._history = HistoryDiagnostics(self)
+        self._history.changed.connect(self.changed.emit)
+        self._history_closing = False
         self._storage = StorageManager(self)
         self._storage.changed.connect(self.changed.emit)
         self._storage.mutated.connect(self.refresh)
@@ -136,6 +147,69 @@ class DesktopController(QObject):
     def diagnosticPreview(self):
         return self._diagnostic_preview
 
+    @Property(str, notify=changed)
+    def diagnosticDescription(self):
+        return ('歷史任務讀取時的快照，最多 200 筆過濾事件；版本以該次保存內容為準，未記錄者標示 unknown。'
+                if self._diagnostic_scope == 'history' else
+                '本次開啟 App 最近 200 筆過濾事件與狀態；不含個資、訂位代碼或完整日誌。')
+
+    @Property(QObject, constant=True)
+    def historyDiagnostics(self):
+        return self._history
+
+    @Slot()
+    def prepareHistory(self):
+        self._history.begin(self.path)
+
+    @Slot(result=bool)
+    def prepareHistoricalDiagnostics(self):
+        if self._history.busy or not self._history.preview or self._history.config != self.path:
+            return False
+        self._diagnostic_preview = self._history.preview
+        self._diagnostic_scope = 'history'
+        self.changed.emit()
+        return True
+
+    @Property(bool, notify=changed)
+    def notificationsEnabled(self):
+        return self._notifications_enabled
+
+    @Property(bool, notify=changed)
+    def notificationsAvailable(self):
+        return self._notification_available
+
+    def set_notification_support(self, available):
+        self._notification_available = bool(available)
+        self.changed.emit()
+
+    @Slot(bool)
+    def setNotifications(self, enabled):
+        try:
+            self.preferences.notifications(enabled)
+        except OSError:
+            self.notify('通知設定無法保存，請確認 App 資料夾權限。', True)
+            self.changed.emit()
+            return
+        self._notifications_enabled = enabled
+        self.notificationsChanged.emit(enabled)
+        self.changed.emit()
+
+    @Slot(str)
+    def openNotification(self, target):
+        if target in ('records', 'progress'):
+            self.navigate(3 if target == 'records' else 2)
+
+    def notify_task_finished(self):
+        if self._notification_emitted:
+            return
+        self._notification_emitted = True
+        if not self._notifications_enabled:
+            return
+        item = task_notification(self._task_snapshot.get('code', 'interrupted'),
+                                 self._query_only, self._guard, self._stage)
+        if item:
+            self.desktopNotification.emit(item['title'], item['body'], item['target'])
+
     @Property(QObject, constant=True)
     def storage(self):
         return self._storage
@@ -156,6 +230,7 @@ class DesktopController(QObject):
 
     @Slot()
     def prepareDiagnostics(self):
+        self._diagnostic_scope = 'session'
         self._diagnostic_preview = json.dumps(snapshot(
             self._diagnostic_events, self._task_snapshot.get('code'), self._guard, self._running),
             ensure_ascii=False, indent=2)
@@ -347,6 +422,8 @@ class DesktopController(QObject):
             new = form_values(read_config_data(path))
             # Keep the original location: its state/runs guard must follow the setting.
             self.path = Path(path).resolve()
+            if self._history.config != self.path:
+                self._history.reset(self.path)
             self._form = new
             self._saved_form = dict(new)
             self._protect_private = is_protected(raw)
@@ -472,6 +549,7 @@ class DesktopController(QObject):
         self._recovery = ''
         self._received_done = False
         self._received_completion = False
+        self._notification_emitted = False
         self._running, self._attempt, self._log = True, 0, ''
         self._match = {}
         self._phase = '準備啟動'
@@ -487,6 +565,7 @@ class DesktopController(QObject):
             self.persist_task('operation_failed')
             self._phase = '任務無法啟動'
             self.notify('無法啟動背景工作，請關閉並重新開啟 App。', True)
+            self.notify_task_finished()
 
     @Slot()
     def stop(self):
@@ -495,6 +574,10 @@ class DesktopController(QObject):
 
     @Slot()
     def requestClose(self):
+        if self._history.busy and not self._running and not self._storage.busy:
+            self._history_closing = True
+            self._history.cancel()
+            return
         if self._record_loader.busy and not self._running and not self._storage.busy:
             self._records_closing = True
             self._record_loader.cancel()
@@ -535,6 +618,10 @@ class DesktopController(QObject):
 
     @Slot()
     def poll(self):
+        self._history.poll()
+        if self._history_closing and not self._history.busy:
+            self._history_closing = False
+            self.requestClose()
         self._record_loader.poll()
         if self._records_closing and not self._record_loader.busy:
             self._records_closing = False
@@ -592,6 +679,7 @@ class DesktopController(QObject):
                 self._phase = '任務非預期結束'
                 self.notify('任務未回傳完成狀態；請先在我的訂位確認結果，勿直接重送。', True)
             self.refresh()
+            self.notify_task_finished()
             if self._closing:
                 self._closing = False
                 self.requestClose()

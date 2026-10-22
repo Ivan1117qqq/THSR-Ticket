@@ -2,6 +2,7 @@
 from pathlib import Path
 from requests import RequestException
 from thsr_ticket.automation import AutomationConfig, AutomationRunner, WebsiteRejected, wait_until
+from thsr_ticket.run_records import RunRecords
 
 
 STATIONS = ['南港', '台北', '板橋', '桃園', '新竹', '苗栗', '台中', '彰化', '雲林', '嘉義', '台南', '左營']
@@ -85,6 +86,11 @@ def run_background(config, path, query_only, stop, messages, client_factory=None
         messages.put(('text', str(text) + '\n'))
 
     phase = 'preflight'
+    history = RunRecords(path.resolve().with_suffix('.state.json'),
+                         event_sink=lambda event: messages.put(('event', event)), output=emit)
+    history.event('run_started', query_only=query_only, ocr_model=config.ocr_model,
+                  max_attempts=config.max_attempts, interval_seconds=config.interval_seconds)
+    history.event('stage', phase=phase)
     outcome = '執行結束'
     try:
         if stop.is_set():
@@ -99,22 +105,25 @@ def run_background(config, path, query_only, stop, messages, client_factory=None
             from thsr_ticket.captcha import CaptchaReader
             reader_factory = CaptchaReader
         phase = 'browser_start'
+        history.event('stage', phase=phase)
         messages.put(('phase', '正在啟動瀏覽器'))
         client = client_factory(channel='chrome', interactive=False)
         phase = 'ocr_load'
+        history.event('stage', phase=phase)
         messages.put(('phase', '正在準備辨識模型'))
         reader = reader_factory(model=config.ocr_model)
         if not reader.prepare():
             raise RuntimeError('OCR 無法載入，請確認已安裝自動化套件。')
         emit(f'等待台灣時間 {config.start_at.isoformat()}；可按停止取消。')
         phase = 'schedule'
+        history.event('stage', phase=phase)
         messages.put(('phase', '等待啟動時間：' + config.start_at.strftime('%m/%d %H:%M')))
         wait_until(config.start_at, sleep=sleep)
         if stop.is_set():
             raise KeyboardInterrupt()
         runner = (runner_factory or AutomationRunner)(
             config, StoppableClient(client, stop), reader, state, sleep=sleep,
-            event_sink=lambda event: messages.put(('event', event)), output=emit)
+            event_sink=lambda event: messages.put(('event', event)), output=emit, records=history)
         phase = 'query'
         success = runner.run(query_only)
         outcome = ('找到符合車次' if query_only else '訂位成功，尚未付款') if success else '已達查詢上限'
@@ -152,6 +161,10 @@ def run_background(config, path, query_only, stop, messages, client_factory=None
             except Exception:
                 emit('瀏覽器清理失敗，請檢查程式開啟的獨立視窗。')
         emit(outcome)
+        final_phase = getattr(runner, 'phase', phase)
+        if not isinstance(final_phase, str):
+            final_phase = phase
+        history.event('task_completed', outcome=failure or 'success', phase=final_phase)
         messages.put(('completion', {'code': failure or 'success', 'message': outcome,
                                      'action': 'records' if failure == 'booking_unconfirmed' else
                                      'official' if failure == 'website_rejected' else

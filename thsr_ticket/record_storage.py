@@ -57,7 +57,7 @@ def inspect_run(directory, cancel=None):
                 digest.update(content)
                 size += len(content)
                 validate_record(json.loads(content))
-    if last.get('event') not in ('run_finished', 'run_stopped'):
+    if last.get('event') not in ('run_finished', 'run_stopped', 'task_completed'):
         raise RunSkipped('unfinished')
     date = datetime.fromtimestamp((directory / 'events.jsonl').stat().st_mtime, timezone(timedelta(hours=8)))
     return {'id': directory.name, 'bytes': size, 'digest': digest.hexdigest(),

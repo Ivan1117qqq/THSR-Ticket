@@ -182,11 +182,13 @@ def captcha_rejected(response):
 
 
 class AutomationRunner:
-    def __init__(self, config, client, reader, state_path, sleep=time.sleep, event_sink=None, output=print):
+    def __init__(self, config, client, reader, state_path, sleep=time.sleep,
+                 event_sink=None, output=print, records=None):
         self.config, self.client, self.reader = config, client, reader
         self.state_path = Path(state_path)
         self.sleep = sleep
         self.records = None
+        self._provided_records = records
         self.attempt = 0
         self.phase = 'starting'
         self.event_sink = event_sink
@@ -213,12 +215,15 @@ class AutomationRunner:
                            elapsed_ms=round((time.perf_counter() - self.attempt_started) * 1000, 3))
 
     def run(self, query_only=False):
-        self.records = RunRecords(self.state_path, event_sink=self.event_sink, output=self.output)
+        provided = self._provided_records
+        self._provided_records = None
+        self.records = provided or RunRecords(self.state_path, event_sink=self.event_sink, output=self.output)
         self.attempt = 0
         self.phase = 'starting'
         started = time.perf_counter()
-        self.records.event('run_started', query_only=query_only, ocr_model=self.config.ocr_model,
-                           max_attempts=self.config.max_attempts, interval_seconds=self.config.interval_seconds)
+        if provided is None:
+            self.records.event('run_started', query_only=query_only, ocr_model=self.config.ocr_model,
+                               max_attempts=self.config.max_attempts, interval_seconds=self.config.interval_seconds)
         self.output(f'執行紀錄：{self.records.events_path}')
         try:
             with record_lock(self.state_path):
