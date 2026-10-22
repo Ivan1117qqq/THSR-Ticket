@@ -2,6 +2,8 @@
 
 本文件以 **0.3.1 的原始碼，以及 2026-10-03 的清理結果**為基準。對象是第一次接觸這個專案、希望理解「為什麼這樣設計」以及「程式實際怎麼執行」的讀者。
 
+後續增補位於文末。2026-10-23 的歷史診斷與桌面通知另有 [操作及實作流程](history-diagnostics.md)；它們為尚未重新打包的原始碼更新，既有 0.4.0 安裝包不包含。
+
 **0.3.2 增補：任務復原的分層範例。** `task_status.py` 將有限的完成代碼保存到設定旁的 `.task.json`，並以純函式將摘要與訂位防重送狀態轉成可呈現的資料；`DesktopController` 協調讀寫，`TaskPanel.qml` 在首頁與進度頁共用。摘要只用於診斷與導引，不能取代 `.state.json`。啟動後若摘要仍顯示執行中，提示前次任務需要核對，不會自動重送；可能上次未正常結束，也可能另一個視窗仍在執行。
 
 這項增補示範「狀態判定、Qt 操作、視覺元件分開」：新增 `test_task_status.py` 可不啟動 Qt 就檢查狀態優先序；Qt 測試再驗證重啟、切換設定與核對完成後的畫面資料。以下 0.3.1 歷史測試數字保留，0.3.2 最新回歸為 226 通過、11 跳過。
@@ -100,7 +102,7 @@
 .\.venv\windows\Scripts\python.exe -m flake8 --config .config/flake thsr_ticket scripts -j 1
 ```
 
-若沒有環境，依 [README](../README.md) 建立 venv；開發桌面及打包功能可安裝 `requirements-build.txt`。它包含桌面與自動化依賴鏈，不需要把每份 requirements 重複裝一次。
+若沒有環境，依 [README](../README.md) 建立 venv；開發桌面及打包功能可安裝 `requirements-build.txt` 與 `requirements-dev.txt`。它包含桌面與自動化依賴鏈，不需要把每份 requirements 重複裝一次。
 
 若 pytest 的系統暫存目錄被鎖住，指定一個**全新且可丟棄**的路徑：
 
@@ -514,7 +516,7 @@ requirements-build.txt
 
 `requirements.txt` 是 setup 的基本依賴範圍；`requirements-lock.txt` 固定已驗證環境版本。`requirements-automation.txt` 是較小的選用依賴清單。它們用途不同，不能只因名稱相似就刪掉。
 
-目前基本依賴仍混有 pytest、mypy 等開發工具。這是可改善項，不代表本次已完成 runtime/dev 分離；直接移除會連帶改變安裝契約與 CI。
+0.4.0 已將 pytest、Mypy、Flake8 等工具移至開發清單，並同步更新 CI。打包清單不含開發工具；若要先測試再打包，請同時安裝 requirements-dev.txt。詳見 [發行與依賴管理](releasing.md)。
 
 ### 17.2 EXE 怎麼出來
 
@@ -595,10 +597,10 @@ requirements-build.txt
 - 手動核對、本機付款狀態與官網狀態不會自動同步。
 - `Main.qml` 與 controller 可再依頁面／服務拆分，減少新增功能時的修改面積。
 - 舊互動式 CLI、Tk 與舊 JSON-schema 模型仍有維護成本；移除前要決定相容性承諾並遷移測試。
-- `requirements.txt` 的開發與執行依賴可拆分，lock 檔也可建立更明確的產生流程。
+- 0.4.0 已拆分執行、開發與打包依賴；跨 Python／OS 組合及 hash lock 的完整驗證仍可繼續改善。
 - `make check` 中的 mypy / pylint 舊設定不代表全部通過；目前主要回歸門檻是 pytest 與指定設定的 Flake8。
 - 單設定鎖不涵蓋多份設定對同一旅程的全域去重；目前是單任務桌面設計。
-- 日誌有磁碟保存但沒有完整的保存期限、清理介面與集中式監控。
+- 日誌已有磁碟保存、背景整理與診斷介面；永久清理、保存期限與集中式監控仍未提供。
 
 學習時可以把每個改動都問成四件事：輸入是什麼、誰負責決策、失敗後留下什麼、用哪個測試證明。能清楚回答這四件事，就能逐步掌握整個專案，而不必一次記住所有檔名。
 ## 增補：單一桌面程序
@@ -611,10 +613,10 @@ API 行為參考 [QLockFile](https://doc.qt.io/qtforpython-6/PySide6/QtCore/QLoc
 
 ## 紀錄管理更新（2026-10-18）
 
-最新原始碼已提供紀錄版本 1 相容驗證、GUI 歷史整理預覽及重開後還原。見 [紀錄管理說明](record-storage.md)。整理採可還原移動，未提供永久刪除或保留期限；損壞目前狀態仍保留防重送保護，不能自動推測官網結果。既有 0.3.3 安裝包未重建。
+最新原始碼已提供紀錄版本 1 相容驗證、GUI 歷史整理預覽及重開後還原。見 [紀錄管理說明](record-storage.md)。整理採可還原移動，未提供永久刪除或保留期限；損壞目前狀態仍保留防重送保護，不能自動推測官網結果。上述功能已在後續整合至 0.4.0 安裝包。
 ## 背景資料管理（2026-10-18）
 
-原始碼新增日期篩選、逐筆勾選、選取統計與指定備份批次還原；掃描、雜湊及檔案操作移至背景，支援掃描取消並在關閉程式時等待操作完成。日期依紀錄修改時間（台灣時間）；詳見 [操作說明](record-storage.md)。此更新尚未重建安裝包。
+原始碼新增日期篩選、逐筆勾選、選取統計與指定備份批次還原；掃描、雜湊及檔案操作移至背景，支援掃描取消並在關閉程式時等待操作完成。日期依紀錄修改時間（台灣時間）；詳見 [操作說明](record-storage.md)。後續已整合至 0.4.0 安裝包。
 ## 紀錄操作的中斷復原（2026-10-22）
 
 `record_storage.py` 決定哪些紀錄可以整理，取得共用操作鎖並重新比對預覽。真正的目錄移動委派給 `storage_journal.py`：先把操作方向、批次及每筆內容雜湊寫成 `pending`，再執行移動，完成後寫成 `complete`。保存清單使用既有 `atomic_json`，先 flush／fsync 暫存內容再 replace；不將 Qt 狀態或個人設定序列化。
@@ -639,3 +641,10 @@ API 行為參考 [QLockFile](https://doc.qt.io/qtforpython-6/PySide6/QtCore/QLoc
 `ScanReport` 提供 accepted、skipped、failed 與固定原因計數。讀檔錯誤在單筆邊界處理，其他可讀資料繼續保留；根目錄無法存取則回報整體錯誤。未知版本、壞 JSON、尚未結束的執行、額外檔案與連結等原因分別呈現，不輸出原始例外、證號或私人路徑。掃描事件時使用同一串原始 bytes 同時計算雜湊與解析，避免先解析後再重讀一次。
 
 `scripts/benchmark_records.py` 建立 100／1,000／3,000 筆暫存假資料，量測掃描、單筆整理驗證、背景歷史讀取及 2,000 次勾選切換，並檢查沒有 model reset。這是可重跑的本機基準，不是跨電腦效能承諾；主執行緒事件循環仍有執行，也不等於已量測完整畫面的幀率。詳細操作與量測範圍見 [紀錄管理](record-storage.md)。
+## 單一版本與乾淨發行環境（0.4.0）
+
+`thsr_ticket/version.py` 是唯一維護的版本字串。setup 在建置時讀取它；PyInstaller spec 呼叫 release_metadata，以同一個值產生 Windows 四段數值版本、文字版本與 Inno include。安裝包編譯完成後，finalize 計算最終安裝包的 SHA-256 與大小，CI 再讀取 release.json 核對檔名、hash 與 EXE 版本。原手動維護的 installer/version_info.txt 已移除。
+
+產品執行、開發檢查與 EXE 打包各有依賴入口。這次用三個新的 venv 驗證基本執行、開發與打包環境，從本機 wheelhouse 離線安裝並執行 pip check；執行環境不含開發工具，打包環境亦不含 pytest 等工具。產品 wheel 以隔離模式從 site-packages 匯入，版本與 QML／SVG 資源完整，沒有依賴工作目錄。來源封裝亦經 PEP 517 隔離建置為 wheel，避免只在原工作區能建置。
+
+正式 App 已安裝時，不應以發行驗收為由覆蓋或解除安裝它。installer_fixture 使用同一模板產生不同 AppId 的測試包；這次保留舊 0.3.3 payload，產生舊、新測試包後驗證真正的版本升級及假資料 hash 保留。不同 AppId 與停用壓縮是隔離測試差異，因此仍需在獨立乾淨 Windows 上驗收正式產物。重現指令與完整限制見 [發行管理](releasing.md)。

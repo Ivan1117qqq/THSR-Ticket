@@ -1,5 +1,24 @@
 # 專案驗證紀錄
 
+## 歷史診斷與桌面通知（2026-10-23 原始碼）
+
+- 完整桌面必測：343 通過、11 項選用測試跳過；Flake8 通過。指令為 `python -m pytest -q -p no:cacheprovider --require-desktop --basetemp build/history-notifications-verified --junitxml=build/history-notifications-tests.xml`。
+- 新增 28 項測試，涵蓋過去任務／歷史備份、版本來源與舊版未知值、允許清單、4 MiB 尾端限制、壞行／深層 JSON／超大整數、取消、過期結果、關閉等待及凍結快照匯出。
+- 背景準備失敗仍保存單一事件檔；真實 runner 搭配假 HTML 驗證準備與查詢共用一份日誌，且只查票不送出訂位。資料整理接受新的 `task_completed` 終止事件，既有防重送及中斷復原測試保留。
+- 通知測試檢查預設關閉、偏好互不覆蓋、保存失敗、結果優先序、一次性發出及點擊目的頁。系統匣以 Mock 代替，沒有發出真實 Windows 通知。
+- 假資料預覽工具成功產生 100／125／150% 縮放的頁面、歷史診斷及匯出預覽，QML 無警告；輸出位於 `build/history-notifications-preview/`。實際視覺檢查另以圖片確認。
+- 僅更新原始碼，沒有重建既有 0.4.0 EXE／安裝包，也未修改正式安裝。Windows 真實通知呈現、點擊喚回焦點及官網驗收仍待人工執行；沒有讀取個人訂位內容或連線訂位。
+
+## 0.4.0 發行整合（2026-10-22）
+
+- 完整桌面必測：315 通過、11 項選用測試跳過；Flake8 通過。包含單一版本產生、數值／文字資源同步、hash 與非法版本保護。
+- 新的 runtime／dev／build venv 均從固定版本 wheelhouse 離線安裝並通過 pip check。runtime 不含 pytest、Flake8、Mypy、Pylint、PyInstaller、Qt；build 不含開發檢查工具。獨立 dev 環境另通過 11 項不需 Qt 的版本與掃描測試，這是子集驗證，不與完整測試數相加。
+- Python wheel 以 -I 從 site-packages 載入，VERSION 與 distribution metadata 均為 0.4.0，未包含專案測試；CLI --help 可離線執行。桌面 wheel 的 QML／SVG 資源完整；sdist 可在 PEP 517 隔離環境從本機 wheelhouse 重建為 wheel。
+- EXE 由不含開發工具的乾淨 build venv 建置。移除 Python 環境變數並限制 PATH 後，QML（無警告）、standard／beta OCR、Playwright 與 DPAPI 自我檢查均通過；檔案及產品版本均為 0.4.0。
+- 由同一安裝模板產生不同 AppId、名稱、路徑且停用壓縮的測試包；舊 payload 經版本檢查為 0.3.3，新 payload 為 0.4.0。實際升級成功，8 份假資料在升級及解除安裝後 hash 保留，安裝／解除安裝的執行中保護與安裝後自我檢查通過。驗證報告位於 build/installer-smoke-fa1bbe42396644e791097d4c5fd8e74d/validation.json。
+- 正式未簽章產物：dist/installer/TravelDesk-Setup-0.4.0.exe，264,123,823 bytes；SHA-256：77BBF756EC2FDE078F083DBE929EADDC22B639E54C041EFF4C5D3F5D4C560000。旁附 .sha256；dist/release.json 記錄同一版本、大小與 hash。Authenticode 狀態為 NotSigned。
+- 保留既有正式安裝，測試 AppId 已解除安裝。未讀取真實訂位／設定或連線官網；本機不同 AppId 驗收不是正式 AppId 的獨立乾淨 Windows 驗收，也不代表資料格式轉換與所有舊版本升級皆通過。新版遠端 workflow 尚未執行。
+
 ## 0.3.3 發行準備（2026-10-18）
 
 - 已透過 GitHub 公開 API 確認 commit `80ab7f9b18e69b6b283e3c6ff7f3981e4319954d` 的 [CI 執行](https://github.com/Ivan1117qqq/THSR-Ticket/actions/runs/37131353001) 完成且成功：`desktop` Windows 工作與 `build (3.13)` Linux 工作皆通過。這是上次推送的驗證，不代表 0.3.3 版本更新已通過遠端 CI。

@@ -1,6 +1,6 @@
 # 逐檔用途、清理依據與保留邊界
 
-盤點日期：2026-10-03；現行基準版本 0.3.2。搭配 [完整開發指南](development-guide.md) 與 [後續優化計畫](roadmap.md) 閱讀。下方清理紀錄保留 0.3.1 階段的歷史依據。
+更新日期：2026-10-23；現行版本 0.4.0，歷史診斷與通知為尚未打包的原始碼更新。搭配 [完整開發指南](development-guide.md) 與 [後續優化計畫](roadmap.md) 閱讀。下方清理紀錄保留 0.3.1 階段的歷史依據。
 
 ## 如何判斷檔案能不能刪
 
@@ -73,17 +73,27 @@
 | [docs/verification.md](../docs/verification.md) | 各階段驗證結果與未完成項目；歷史數字不是最新總數。 |
 | [installer/TraditionalChinese.isl](../installer/TraditionalChinese.isl) | Inno Setup 使用的繁體中文安裝訊息。 |
 | [installer/TravelDesk.iss](../installer/TravelDesk.iss) | Windows 安裝、捷徑、版本及執行中保護規則。 |
-| [installer/version_info.txt](../installer/version_info.txt) | PyInstaller 引用的 Windows EXE 版本資源。 |
+| [CHANGELOG.md](../CHANGELOG.md) | 發行版本與功能摘要。 |
+| [MANIFEST.in](../MANIFEST.in) | 來源封裝納入依賴清單與桌面資源。 |
+| [pyproject.toml](../pyproject.toml) | PEP 517 建置後端與固定 setuptools 版本。 |
+| [docs/releasing.md](releasing.md) | 統一版本、依賴分類、建置與隔離安裝升級驗收。 |
+| [docs/history-diagnostics.md](history-diagnostics.md) | 歷史任務診斷、匯出範圍、桌面通知操作與背景工作設計。 |
+| [scripts/release_metadata.py](../scripts/release_metadata.py) | 由單一版本來源產生 Windows 資源、安裝版本、hash 與發行資訊。 |
+| [scripts/installer_fixture.py](../scripts/installer_fixture.py) | 產生不同 AppId 的隔離安裝測試包，檢查 payload 版本。 |
+| [scripts/build_release.ps1](../scripts/build_release.ps1) | 串接桌面必測、打包、安裝編譯與發行資訊產生。 |
+| [thsr_ticket/unittest/test_release_metadata.py](../thsr_ticket/unittest/test_release_metadata.py) | 版本一致性、hash、非法版本與不執行來源內容的測試。 |
 | [makefile](../makefile) | 開發命令集合；其中型別與 pylint 舊檢查需另外維護。 |
 | [pytest.ini](../pytest.ini) | 測試根目錄與 browser/integration 標記。 |
 | [requirements-automation-lock.txt](../requirements-automation-lock.txt) | 引用基礎 lock，固定自動化與 OCR 執行依賴。 |
 | [requirements-automation.txt](../requirements-automation.txt) | 選用瀏覽器與 OCR 直接依賴清單。 |
-| [requirements-build.txt](../requirements-build.txt) | 引用桌面依賴並加入 PyInstaller。 |
+| [requirements-build.txt](../requirements-build.txt) | 引用桌面依賴並固定 PyInstaller 及其建置依賴，不含開發工具。 |
 | [requirements-desktop.txt](../requirements-desktop.txt) | 引用自動化 lock 並加入 Qt。 |
-| [requirements-lock.txt](../requirements-lock.txt) | 固定基礎環境版本，包含測試與檢查工具。 |
-| [requirements.txt](../requirements.txt) | setup 的基本依賴範圍，目前仍包含開發工具。 |
+| [requirements-lock.txt](../requirements-lock.txt) | 固定基本執行依賴，不含開發工具。 |
+| [requirements-dev.txt](../requirements-dev.txt) | 引用基本執行依賴與開發工具 lock。 |
+| [requirements-dev-lock.txt](../requirements-dev-lock.txt) | 固定 pytest、Flake8、Mypy、Pylint 與其依賴。 |
+| [requirements.txt](../requirements.txt) | setup 的基本執行依賴範圍。 |
 | [scripts/build_icon.py](../scripts/build_icon.py) | 從 SVG 產生打包所需 PNG/ICO；由 spec 呼叫。 |
-| [scripts/preview_desktop.py](../scripts/preview_desktop.py) | 使用假資料離線渲染頁面與取消視窗。 |
+| [scripts/preview_desktop.py](../scripts/preview_desktop.py) | 使用假資料離線渲染頁面、資料管理、歷史診斷、匯出與取消視窗。 |
 | [scripts/sign_release.ps1](../scripts/sign_release.ps1) | 未來持有簽章憑證時使用；目前未簽章交付仍保留此發行工具。 |
 | [scripts/test_installer.ps1](../scripts/test_installer.ps1) | 隔離安裝、升級、解除安裝及假資料保留驗收。 |
 | [setup.py](../setup.py) | Python 套件、版本、package data 與 CLI/Qt/Tk entry points。 |
@@ -95,6 +105,8 @@
 | [thsr_ticket/config_store.py](../thsr_ticket/config_store.py) | 設定版本檢查、舊格式備份遷移、JSON 原子保存與 Windows DPAPI 欄位保護。 |
 | [thsr_ticket/unittest/test_config_store.py](../thsr_ticket/unittest/test_config_store.py) | 舊格式唯讀相容、首次備份、未知版本阻擋與失敗不覆寫測試。 |
 | [thsr_ticket/diagnostics.py](../thsr_ticket/diagnostics.py) | 診斷欄位與值的允許清單、事件上限及環境／狀態快照；不匯出原始日誌。 |
+| [thsr_ticket/history_diagnostics.py](../thsr_ticket/history_diagnostics.py) | 過去任務與備份的受限唯讀掃描、環境來源、結果分類及診斷過濾。 |
+| [thsr_ticket/unittest/test_history_diagnostics.py](../thsr_ticket/unittest/test_history_diagnostics.py) | 舊紀錄、大型／損壞內容、個資排除、結果未知、取消及背景共用日誌測試。 |
 | [thsr_ticket/unittest/test_diagnostics.py](../thsr_ticket/unittest/test_diagnostics.py) | 個資排除、未知型別與數值處理、事件數量及快照獨立性測試。 |
 | [thsr_ticket/configs/__init__.py](../thsr_ticket/configs/__init__.py) | 保留套件標記／初始化；Python 匯入與 setuptools 套件發現需要整體判斷，不因內容少就刪除。 |
 | [thsr_ticket/configs/common.py](../thsr_ticket/configs/common.py) | 既有日期、時間選項與票數常數，供模型與互動式 CLI 使用。 |
@@ -113,13 +125,16 @@
 | [thsr_ticket/desktop/__main__.py](../thsr_ticket/desktop/__main__.py) | Qt 啟動、資源載入、安裝保護 mutex 與隔離 self-test。 |
 | [thsr_ticket/desktop/assets/app.svg](../thsr_ticket/desktop/assets/app.svg) | 應用程式向量圖示；Qt 與 icon 建置都使用。 |
 | [thsr_ticket/desktop/controller.py](../thsr_ticket/desktop/controller.py) | QML 的 Property/Signal/Slot、任務管理、資料操作及 queue 消費端。 |
-| [thsr_ticket/desktop/preferences.py](../thsr_ticket/desktop/preferences.py) | 只保存最近設定路徑的桌面偏好。 |
+| [thsr_ticket/desktop/preferences.py](../thsr_ticket/desktop/preferences.py) | 保存最近設定路徑與桌面通知開關；各偏好更新時保留其他已知欄位。 |
+| [thsr_ticket/desktop/history.py](../thsr_ticket/desktop/history.py) | 歷史診斷背景工作、取消、過期結果丟棄、選取與過濾快照。 |
+| [thsr_ticket/desktop/notifications.py](../thsr_ticket/desktop/notifications.py) | 固定通知分類、可用性與開關判斷、系統匣介接及點擊回到頁面。 |
 | [thsr_ticket/desktop/single_instance.py](../thsr_ticket/desktop/single_instance.py) | 使用者資料目錄單一實例鎖、本機喚回通道與視窗還原；不接收訂位命令。 |
 | [thsr_ticket/unittest/test_single_instance.py](../thsr_ticket/unittest/test_single_instance.py) | 實際子程序重複啟動、強制結束復原、通道失敗與視窗喚回測試。 |
 | [thsr_ticket/desktop/qml/AppButton.qml](../thsr_ticket/desktop/qml/AppButton.qml) | 共用按鈕外觀與互動。 |
 | [thsr_ticket/desktop/qml/Card.qml](../thsr_ticket/desktop/qml/Card.qml) | 共用卡片容器。 |
 | [thsr_ticket/desktop/qml/Field.qml](../thsr_ticket/desktop/qml/Field.qml) | 共用欄位、眼睛遮蔽、日期時間選擇及錯誤提示。 |
 | [thsr_ticket/desktop/qml/Main.qml](../thsr_ticket/desktop/qml/Main.qml) | 主視窗、頁面、導覽、紀錄與確認對話框。 |
+| [thsr_ticket/desktop/qml/HistoryDialog.qml](../thsr_ticket/desktop/qml/HistoryDialog.qml) | 歷史任務列表、階段與指引、重新讀取／取消及診斷預覽入口。 |
 | [thsr_ticket/desktop/qml/NavIcon.qml](../thsr_ticket/desktop/qml/NavIcon.qml) | 側欄圖示元件。 |
 | [thsr_ticket/desktop/updates.py](../thsr_ticket/desktop/updates.py) | 手動檢查固定 GitHub release 來源，不自動安裝更新。 |
 | [thsr_ticket/gui.py](../thsr_ticket/gui.py) | 舊 Tk GUI；setup 保留入口且有回歸測試，不屬於死碼。 |
@@ -197,4 +212,4 @@
 | [thsr_ticket/desktop/qml/TaskPanel.qml](../thsr_ticket/desktop/qml/TaskPanel.qml) | 首頁與進度頁共用狀態卡、階段與復原入口。 |
 | [thsr_ticket/unittest/test_task_status.py](../thsr_ticket/unittest/test_task_status.py) | 狀態優先序、損壞資料、摘要欄位限制與復原路由測試。 |
 
-本次紀錄效能更新後，本表共 145 個檔案；每個程式碼檔案均有獨立用途列，包含相容入口與測試。設定旁的 `*.task.json` 為本機任務摘要，`*.runs.operations/` 為本機紀錄操作清單，均已加入 Git 忽略清單；不取代原有防重送紀錄。
+本次發行管理更新後，本表共 154 個檔案；每個程式碼檔案均有獨立用途列，包含相容入口與測試。原 `installer/version_info.txt` 已由 `build/release/version_info.txt` 產物取代，不再維護第二份版本來源。設定旁的 `*.task.json` 與 `*.runs.operations/` 均已加入 Git 忽略清單；不取代原有防重送紀錄。
