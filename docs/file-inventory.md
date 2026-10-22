@@ -142,6 +142,11 @@
 | [thsr_ticket/record_storage.py](../thsr_ticket/record_storage.py) | 歷史執行紀錄預覽、可還原整理與備份搜尋。 |
 | [thsr_ticket/storage_journal.py](../thsr_ticket/storage_journal.py) | 操作清單寫入、未完成批次偵測、預檢與中斷復原。 |
 | [thsr_ticket/storage_errors.py](../thsr_ticket/storage_errors.py) | 紀錄操作錯誤分類、固定訊息及處理指引。 |
+| [thsr_ticket/scan_report.py](../thsr_ticket/scan_report.py) | 掃描統計、固定略過原因與取消協定。 |
+| [thsr_ticket/desktop/storage_model.py](../thsr_ticket/desktop/storage_model.py) | Qt 清單資料角色、逐列勾選更新與選取容量統計。 |
+| [thsr_ticket/desktop/record_loader.py](../thsr_ticket/desktop/record_loader.py) | 訂位背景讀取、合併刷新與過期快照丟棄。 |
+| [thsr_ticket/unittest/test_record_scanning.py](../thsr_ticket/unittest/test_record_scanning.py) | 掃描部分失敗、所選紀錄驗證與結果保留測試。 |
+| [scripts/benchmark_records.py](../scripts/benchmark_records.py) | 使用暫存假資料量測掃描、整理、背景載入與 Qt 模型更新。 |
 | [thsr_ticket/unittest/test_storage_recovery.py](../thsr_ticket/unittest/test_storage_recovery.py) | 程序中斷、可重入復原、內容衝突與清單失敗測試。 |
 | [thsr_ticket/unittest/test_record_storage.py](../thsr_ticket/unittest/test_record_storage.py) | 紀錄版本、防重送保護及整理還原測試。 |
 | [docs/record-storage.md](record-storage.md) | 紀錄整理操作、格式契約與復原限制。 |
@@ -192,4 +197,4 @@
 | [thsr_ticket/desktop/qml/TaskPanel.qml](../thsr_ticket/desktop/qml/TaskPanel.qml) | 首頁與進度頁共用狀態卡、階段與復原入口。 |
 | [thsr_ticket/unittest/test_task_status.py](../thsr_ticket/unittest/test_task_status.py) | 狀態優先序、損壞資料、摘要欄位限制與復原路由測試。 |
 
-本次紀錄復原更新後，本表共 140 個檔案；每個程式碼檔案均有獨立用途列，包含相容入口與測試。設定旁的 `*.task.json` 為本機任務摘要，`*.runs.operations/` 為本機紀錄操作清單，均已加入 Git 忽略清單；不取代原有防重送紀錄。
+本次紀錄效能更新後，本表共 145 個檔案；每個程式碼檔案均有獨立用途列，包含相容入口與測試。設定旁的 `*.task.json` 為本機任務摘要，`*.runs.operations/` 為本機紀錄操作清單，均已加入 Git 忽略清單；不取代原有防重送紀錄。
