@@ -32,6 +32,9 @@ def main():
     destination.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='travel-preview-') as temporary:
         controller = DesktopController(temporary)
+        while controller._record_loader.busy:
+            controller._record_loader._thread.join(timeout=5)
+            controller._record_loader.poll()
         controller._form['personal_id'] = 'DEMO123456'
         engine = QQmlApplicationEngine()
         warnings = []
@@ -45,17 +48,22 @@ def main():
         window.resize(1080, 720)
         for page in range(5):
             controller.navigate(page)
+            while controller._record_loader.busy:
+                controller._record_loader._thread.join(timeout=5)
+                controller._record_loader.poll()
             controller._records = [{'status': 'booked', 'code': 'DEMO1234', 'current': True,
                                     'ticket': {'start_station': '台北', 'dest_station': '台中',
                                                'date': '示範日期', 'depart_time': '09:31', 'train_id': '0117',
                                                'seat': '9 車 3E', 'price': 'TWD 700',
                                                'payment_deadline': '示範期限', 'ticket_num_info': '成人 1 張'}}]
+            controller._record_loader.report = {'accepted': 1, 'skipped': 0, 'failed': 0, 'reasons': []}
             controller.changed.emit()
             for _ in range(30):
                 app.processEvents()
             frame = window.grabWindow()
             if not frame.save(str(destination / f'page-{page}-scale-{args.scale}.png')):
                 raise RuntimeError('Failed to save preview')
+        demo_record = controller._records[0]
         controller.prepareDiagnostics()
         from thsr_ticket.booking_records import record_paths
         _, preview_runs = record_paths(controller.path)
@@ -66,6 +74,12 @@ def main():
         batch = preview_runs.parent / (preview_runs.name + '.history-backups') / ('c' * 32) / ('d' * 32)
         batch.mkdir(parents=True)
         (batch / 'events.jsonl').write_bytes(b'{"event":"run_finished"}\n')
+        malformed = preview_runs / ('1' * 32)
+        malformed.mkdir()
+        (malformed / 'events.jsonl').write_bytes(b'broken')
+        unfinished = preview_runs / ('2' * 32)
+        unfinished.mkdir()
+        (unfinished / 'events.jsonl').write_bytes(b'{"event":"run_started"}\n')
         controller.prepareStorage()
         controller.storage._thread.join(timeout=5)
         controller.storage.poll()
@@ -109,8 +123,10 @@ def main():
         if not window.grabWindow().save(str(destination / f'diagnostics-scale-{args.scale}.png')):
             raise RuntimeError('Failed to save diagnostics preview')
         QMetaObject.invokeMethod(window.findChild(QObject, 'diagnosticDialog'), 'close')
-        demo_record = controller._records[0]
         controller.navigate(3)
+        while controller._record_loader.busy:
+            controller._record_loader._thread.join(timeout=5)
+            controller._record_loader.poll()
         controller._records = [demo_record]
         controller.changed.emit()
         window.setProperty('selected', demo_record)
