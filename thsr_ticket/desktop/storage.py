@@ -8,6 +8,8 @@ from PySide6.QtCore import QObject, Property, QTimer, Signal, Slot
 from thsr_ticket.booking_records import record_paths
 from thsr_ticket.record_storage import inventory, backup_batches, move_history, restore_history, ScanCancelled
 from thsr_ticket.storage_errors import error_info, StorageError
+from thsr_ticket.scan_report import ScanReport
+from thsr_ticket.desktop.storage_model import StorageRows
 from thsr_ticket.storage_journal import pending_operations, recover_operation
 
 
@@ -15,12 +17,16 @@ class StorageManager(QObject):
     changed = Signal()
     mutated = Signal()
     recoveryFound = Signal()
+    selectionChanged = Signal()
+    rowsChanged = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.config = None
-        self.items = []
-        self.selected = set()
+        self._model = StorageRows(self)
+        self._model.selectionChanged.connect(self.selectionChanged.emit)
+        self._model.rowsChanged.connect(self.rowsChanged.emit)
+        self._reports = {}
         self.batches = []
         self._recoveries = []
         self._error = {}
@@ -60,23 +66,49 @@ class StorageManager(QObject):
     def hasRecovery(self):
         return bool(self._recoveries)
 
-    @Property('QVariantList', notify=changed)
+    @property
+    def items(self):
+        return self._model.items
+
+    @items.setter
+    def items(self, value):
+        self._model.replace(value)
+
+    @property
+    def selected(self):
+        return self._model.selected
+
+    @Property(QObject, constant=True)
+    def rowModel(self):
+        return self._model
+
+    @Property('QVariantList', notify=rowsChanged)
     def rows(self):
-        return [{**item, 'selected': item['id'] in self.selected} for item in self.items
-                if (not self._after or item['date'][:10] >= self._after)
-                and (not self._before or item['date'][:10] <= self._before)]
+        return self._model.snapshot()
+
+    @Property(str, notify=changed)
+    def scanSummary(self):
+        labels = {'runs': '執行紀錄', 'backups': '備份批次'}
+        return '；'.join(f'{labels[scope]}：可處理 {value["accepted"]}、略過 {value["skipped"]}、讀取失敗 {value["failed"]}'
+                        for scope, value in self._reports.items())
+
+    @Property('QVariantList', notify=changed)
+    def scanReasons(self):
+        labels = {'runs': '執行紀錄', 'backups': '備份批次'}
+        return [{**reason, 'scope': labels[scope]} for scope, value in self._reports.items()
+                for reason in value['reasons']]
 
     @Property('QVariantList', notify=changed)
     def backups(self):
         return self.batches
 
-    @Property(int, notify=changed)
+    @Property(int, notify=selectionChanged)
     def selectedCount(self):
         return len(self.selected)
 
-    @Property(str, notify=changed)
+    @Property(str, notify=selectionChanged)
     def selectionSummary(self):
-        size = sum(item['bytes'] for item in self.items if item['id'] in self.selected)
+        size = self._model.selected_bytes
         return f'已選 {len(self.selected)} 筆 · {size:,} bytes'
 
     @Slot(str, str)
@@ -94,25 +126,19 @@ class StorageManager(QObject):
             self.changed.emit()
             return
         self._after, self._before = after, before
-        self.selected.clear()  # Hidden selections must never be moved accidentally.
+        self._model.filter(after, before)
         self._message = '篩選已套用，請重新勾選紀錄。'
         self.changed.emit()
 
     @Slot(str, bool)
     def select(self, identifier, checked):
-        if self.busy or identifier not in {row['id'] for row in self.rows}:
-            return
-        if checked:
-            self.selected.add(identifier)
-        else:
-            self.selected.discard(identifier)
-        self.changed.emit()
+        if not self.busy:
+            self._model.select(identifier, checked)
 
     @Slot(bool)
     def selectVisible(self, checked):
         if not self.busy:
-            self.selected = {row['id'] for row in self.rows} if checked else set()
-            self.changed.emit()
+            self._model.select_visible(checked)
 
     def begin(self, config):
         if self.busy:
@@ -139,7 +165,7 @@ class StorageManager(QObject):
     @Slot()
     def moveSelected(self):
         if not self.busy and self.selected and not self.hasRecovery:
-            self._launch('move', [item for item in self.items if item['id'] in self.selected])
+            self._launch('move', self._model.selected_items())
 
     @Slot(str)
     def restoreBatch(self, identifier):
@@ -155,6 +181,7 @@ class StorageManager(QObject):
         self._busy = True
         self._scanning = action in ('scan', 'inspect')
         self._error = {}
+        self._reports = {}
         self._cancel.clear()
         self._message = '正在掃描…' if self._scanning else '正在處理，請等待完成…'
         config = self.config
@@ -168,11 +195,13 @@ class StorageManager(QObject):
                     self._queue.put(('inspect', operations))
                 elif action == 'scan':
                     operations = pending_operations(config, self._cancel)
+                    run_report, backup_report = ScanReport(), ScanReport()
                     items = inventory(config, self._cancel,
-                                      lambda count: self._queue.put(('progress', count)))
-                    batches = backup_batches(config, self._cancel)
+                                      lambda count: self._queue.put(('progress', count)), report=run_report)
+                    batches = backup_batches(config, self._cancel, report=backup_report)
                     blocked = record_paths(config)[0].exists()
-                    self._queue.put(('scan', (items, batches, blocked, operations)))
+                    self._queue.put(('scan', (items, batches, blocked, operations,
+                                              {'runs': run_report.snapshot(), 'backups': backup_report.snapshot()})))
                 elif action == 'move':
                     move_history(config, payload)
                     self._queue.put(('mutated', pending_operations(config)))
@@ -212,7 +241,7 @@ class StorageManager(QObject):
             else:
                 self._busy = self._scanning = False
                 if kind == 'scan' and not self._cancel.is_set():
-                    self.items, self.batches, blocked, self._recoveries = value
+                    self.items, self.batches, blocked, self._recoveries, self._reports = value
                     self._message = ('找到未完成批次，請先到「中斷復原」處理。' if self.hasRecovery else
                                      '目前有訂位狀態，請先核對並封存。仍可還原備份。' if blocked
                                      else f'找到 {len(self.items)} 筆可整理紀錄、{len(self.batches)} 個備份批次。')

@@ -16,6 +16,12 @@ ApplicationWindow {
     property var selected: null
     property bool allowClose: false
     property string pendingAction: ''
+    property int recordPage: 0
+    readonly property int recordPageSize: 25
+    readonly property int recordPageCount: Math.max(1, Math.ceil(filteredRecords.length / recordPageSize))
+    property var visibleRecords: filteredRecords.slice(recordPage * recordPageSize, (recordPage + 1) * recordPageSize)
+    onFilteredRecordsChanged: recordPage = Math.min(recordPage, Math.max(0, Math.ceil(filteredRecords.length / recordPageSize) - 1))
+    onRecordPageChanged: if (ticketsPage.contentItem) ticketsPage.contentItem.contentY = 0
     property var filteredRecords: backend.records.filter(function(r){
         return (history.checked || r.current) &&
             (recordStatus.currentIndex === 0 || r.status === ['','booked','submission_pending','resolved','history'][recordStatus.currentIndex]) &&
@@ -243,26 +249,38 @@ ApplicationWindow {
                         Item {height:6}
                         RowLayout {
                             Layout.fillWidth:true; Layout.leftMargin:28; Layout.rightMargin:28
-                            CheckBox {id:history; text:'包含歷史紀錄'}
+                            CheckBox {id:history; text:'包含歷史紀錄'; onToggled:window.recordPage=0}
                             Item {Layout.fillWidth:true}
-                            AppButton {text:'重新整理'; quiet:true; onClicked:backend.refresh()}
+                            AppButton {text:backend.recordsLoading ? '讀取中…' : '重新整理'; quiet:true; enabled:!backend.recordsLoading; onClicked:backend.refresh()}
                             AppButton {text:'開啟高鐵官網'; onClicked:backend.official()}
                         }
                         RowLayout {
                             Layout.fillWidth:true; Layout.leftMargin:28; Layout.rightMargin:28
-                            TextField {id:recordSearch; placeholderText:'搜尋代碼、車次或車站'; Layout.fillWidth:true; implicitHeight:42; selectByMouse:true}
-                            TextField {id:recordDate; placeholderText:'日期包含，例如 09/30'; Layout.preferredWidth:190; implicitHeight:42}
-                            ComboBox {id:recordStatus; model:['全部狀態','已訂位','待確認','已人工核對','歷史紀錄']; implicitHeight:42}
+                            TextField {id:recordSearch; placeholderText:'搜尋代碼、車次或車站'; Layout.fillWidth:true; implicitHeight:42; selectByMouse:true; onTextChanged:window.recordPage=0}
+                            TextField {id:recordDate; placeholderText:'日期包含，例如 09/30'; Layout.preferredWidth:190; implicitHeight:42; onTextChanged:window.recordPage=0}
+                            ComboBox {id:recordStatus; model:['全部狀態','已訂位','待確認','已人工核對','歷史紀錄']; implicitHeight:42; onActivated:window.recordPage=0}
+                        }
+                        ProgressBar {Layout.fillWidth:true; indeterminate:true; visible:backend.recordsLoading; Layout.leftMargin:28; Layout.rightMargin:28}
+                        Caption {Layout.leftMargin:28; Layout.rightMargin:28; text:backend.recordsSummary}
+                        Repeater {
+                            model:backend.recordsReasons
+                            delegate:Caption {
+                                required property var modelData
+                                Layout.leftMargin:28; Layout.rightMargin:28
+                                text:modelData.label + '：' + modelData.count
+                            }
                         }
                         Card {
-                            visible:window.filteredRecords.length === 0
+                            visible:!backend.recordsLoading && window.filteredRecords.length === 0
                             Layout.fillWidth:true; Layout.leftMargin:28; Layout.rightMargin:28; title:'沒有符合條件的紀錄'
                             Caption {text:'成功訂位後，車次、座位與繳費期限會顯示在這裡。'}
                             AppButton {text:'安排新行程'; primary:true; onClicked:backend.navigate(1)}
                         }
                         Repeater {
-                            model:window.filteredRecords
+                            objectName:'bookingCards'
+                            model:window.visibleRecords
                             delegate:Card {
+                                objectName:'recordTicketCard'
                                 required property var modelData
                                 visible:history.checked || modelData.current
                                 Layout.fillWidth:true; Layout.leftMargin:28; Layout.rightMargin:28
@@ -307,6 +325,13 @@ ApplicationWindow {
                                     }
                                 }
                             }
+                        }
+                        RowLayout {
+                            Layout.leftMargin:32; Layout.rightMargin:32; Layout.fillWidth:true
+                            visible:window.filteredRecords.length > window.recordPageSize
+                            AppButton {text:'上一頁'; enabled:window.recordPage > 0; onClicked:window.recordPage--}
+                            Caption {text:'共 ' + window.filteredRecords.length + ' 筆 · 第 ' + (window.recordPage+1) + ' / ' + window.recordPageCount + ' 頁'}
+                            AppButton {text:'下一頁'; enabled:window.recordPage+1 < window.recordPageCount; onClicked:window.recordPage++}
                         }
                         Caption {Layout.leftMargin:32; Layout.rightMargin:32; text:'紀錄來自本機，不會同步官網付款或取消狀態。移至歷史不會取消原票。'; Layout.bottomMargin:20}
                     }
@@ -402,6 +427,18 @@ ApplicationWindow {
         ColumnLayout {
             anchors.fill:parent; spacing:12
             Caption {text:backend.storage.message}
+            Caption {text:backend.storage.scanSummary; visible:text !== ''}
+            Flow {
+                Layout.fillWidth:true; spacing:12
+                Repeater {
+                    model:backend.storage.scanReasons
+                    delegate:Text {
+                        required property var modelData
+                        text:modelData.scope + ' · ' + modelData.label + ' ' + modelData.count
+                        color:'#8a5f32'; font.pixelSize:12
+                    }
+                }
+            }
             Caption {
                 visible:!!backend.storage.error.code; color:'#a33b30'
                 text:(backend.storage.error.guidance || '') + '  [' + (backend.storage.error.code || '') + ']'
@@ -423,14 +460,17 @@ ApplicationWindow {
             StackLayout {
                 currentIndex:storageTabs.currentIndex; Layout.fillWidth:true; Layout.fillHeight:true
                 ListView {
-                    clip:true; model:backend.storage.rows; spacing:4
+                    clip:true; model:backend.storage.rowModel; spacing:4
                     ScrollBar.vertical:ScrollBar {}
                     delegate:CheckDelegate {
-                        required property var modelData
+                        required property string recordId
+                        required property string dateLabel
+                        required property double recordBytes
+                        required property bool chosen
                         width:ListView.view.width
-                        text:modelData.date + '  ·  ' + modelData.bytes + ' bytes\n' + modelData.id
-                        checked:modelData.selected; enabled:!backend.storage.busy
-                        onClicked:backend.storage.select(modelData.id,checked)
+                        text:dateLabel + '  ·  ' + recordBytes + ' bytes\n' + recordId
+                        checked:chosen; enabled:!backend.storage.busy
+                        onClicked:backend.storage.select(recordId,checked)
                     }
                     Label {anchors.centerIn:parent; visible:parent.count === 0; text:backend.storage.busy ? '正在讀取…' : '此範圍沒有可整理紀錄'}
                 }

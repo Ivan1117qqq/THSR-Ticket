@@ -17,7 +17,7 @@ from pydantic import ValidationError
 from thsr_ticket.application import STATIONS, FIELDS, FieldError, form_config, protected_config_path, run_background
 from thsr_ticket.automation import TAIPEI
 from thsr_ticket.booking_records import (
-    record_entries, record_paths, archive_booking, resolve_pending, confirm_cancelled,
+    record_paths, archive_booking, resolve_pending, confirm_cancelled,
 )
 from thsr_ticket.config_store import read_config_data, write_config_data, is_protected, ConfigVersionError
 from thsr_ticket.desktop.preferences import Preferences
@@ -25,6 +25,7 @@ from thsr_ticket.desktop.updates import check_release, RELEASES
 from thsr_ticket.version import VERSION
 from thsr_ticket.diagnostics import safe_event, snapshot
 from thsr_ticket.desktop.storage import StorageManager
+from thsr_ticket.desktop.record_loader import RecordLoader
 from thsr_ticket.task_status import load_task, save_task, booking_guard, task_view
 
 
@@ -84,6 +85,11 @@ class DesktopController(QObject):
         self._protect_private = os.name == 'nt'
         self._saved_protection = self._protect_private
         self._records = []
+        self._records_source = None
+        self._record_loader = RecordLoader(self)
+        self._record_loader.changed.connect(self.changed.emit)
+        self._record_loader.loaded.connect(self.records_loaded)
+        self._records_closing = False
         self._task_snapshot = {}
         self._guard = ''
         self._query_only = False
@@ -489,6 +495,10 @@ class DesktopController(QObject):
 
     @Slot()
     def requestClose(self):
+        if self._record_loader.busy and not self._running and not self._storage.busy:
+            self._records_closing = True
+            self._record_loader.cancel()
+            return
         if self._storage.busy:
             self._storage_closing = True
             self._storage.cancel()
@@ -525,6 +535,10 @@ class DesktopController(QObject):
 
     @Slot()
     def poll(self):
+        self._record_loader.poll()
+        if self._records_closing and not self._record_loader.busy:
+            self._records_closing = False
+            self.requestClose()
         if self._storage_closing and not self._storage.busy:
             self._storage_closing = False
             self.requestClose()
@@ -579,7 +593,8 @@ class DesktopController(QObject):
                 self.notify('任務未回傳完成狀態；請先在我的訂位確認結果，勿直接重送。', True)
             self.refresh()
             if self._closing:
-                self.closeReady.emit()
+                self._closing = False
+                self.requestClose()
         if dirty:
             self.changed.emit()
         countdown = ''
@@ -591,17 +606,40 @@ class DesktopController(QObject):
             self._countdown = countdown
             self.changed.emit()
 
+    @Property(bool, notify=changed)
+    def recordsLoading(self):
+        return self._record_loader.busy
+
+    @Property(str, notify=changed)
+    def recordsSummary(self):
+        report = self._record_loader.report
+        if not report:
+            return ''
+        return f"已讀 {report['accepted']} 個來源，略過 {report['skipped']}，讀取失敗 {report['failed']}。"
+
+    @Property('QVariantList', notify=changed)
+    def recordsReasons(self):
+        return self._record_loader.report.get('reasons', [])
+
+    def records_loaded(self, config, entries, error):
+        if config != self.path:
+            return
+        self._records = entries
+        if error:
+            self.notify(error['title'] + '；' + error['guidance'], True)
+        self.changed.emit()
+
     @Slot()
     def refresh(self):
         self._guard = booking_guard(self.path)
         if not self._running and not self._summary_warning:
             self._task_snapshot = load_task(self.path)
-        try:
-            self._records = record_entries(self.path)
-            self.changed.emit()
-        except (OSError, ValueError, TypeError):
+        if self._records_source != self.path:
             self._records = []
-            self.notify('紀錄無法讀取，請檢查資料位置。', True)
+            self._record_loader.report = {}
+            self._records_source = self.path
+        self._record_loader.request(self.path)
+        self.changed.emit()
 
     @Slot(str)
     def archive(self, code):

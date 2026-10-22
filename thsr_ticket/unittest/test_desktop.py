@@ -35,8 +35,24 @@ def qt():
 def controller(qt, tmp_path):
     controller = DesktopController(tmp_path, worker=Mock())
     controller._form = values()
+    finish_records(controller)
     yield controller
     controller.timer.stop()
+    controller.storage._timer.stop()
+    controller._record_loader.cancel()
+    finish_records(controller)
+
+
+def finish_records(controller):
+    loader = controller._record_loader
+    for _ in range(10):
+        if not loader.busy:
+            break
+        if loader._thread is not None:
+            loader._thread.join(timeout=5)
+            assert not loader._thread.is_alive()
+        loader.poll()
+    assert not loader.busy
 
 
 def test_diagnostic_preview_exports_exact_snapshot_without_overwrite(controller, tmp_path, monkeypatch):
@@ -112,7 +128,7 @@ def test_storage_scan_runs_off_ui_thread_and_cancels(controller, monkeypatch):
     entered = threading.Event()
     thread_ids = []
 
-    def scan(config, cancel, progress):
+    def scan(config, cancel, progress, report=None):
         thread_ids.append(threading.get_ident())
         entered.set()
         assert cancel.wait(timeout=5)
@@ -152,7 +168,7 @@ def test_close_waits_for_storage_work(controller):
 
 
 def test_storage_error_has_specific_guidance(controller, monkeypatch):
-    def fail(*args):
+    def fail(*args, **kwargs):
         raise PermissionError('PRIVATE-BOOKING-PATH')
 
     monkeypatch.setattr('thsr_ticket.desktop.storage.inventory', fail)
@@ -206,6 +222,118 @@ def test_invalid_recovery_is_read_only_in_gui(controller):
     controller.storage._recoveries = [{'id': 'a' * 32, 'recoverable': False}]
     controller.storage.recover('a' * 32)
     assert not controller.storage.busy
+
+
+def test_row_selection_updates_only_one_row_and_preserves_list(controller):
+    from PySide6.QtCore import Qt
+    manager = controller.storage
+    manager.items = [{'id': f'{index:032x}', 'date': '2026-10-22 12:00:00', 'bytes': 10} for index in range(2000)]
+    model = manager.rowModel
+    reset, changed = Mock(), Mock()
+    model.modelReset.connect(reset)
+    model.dataChanged.connect(changed)
+    controller_changed = Mock()
+    manager.changed.connect(controller_changed)
+    manager.select(f'{123:032x}', True)
+    reset.assert_not_called()
+    controller_changed.assert_not_called()
+    changed.assert_called_once()
+    start, end, roles = changed.call_args.args
+    assert start.row() == end.row() == 123
+    assert roles == [Qt.UserRole + 4]
+    assert manager.selectedCount == 1 and model.selected_bytes == 10
+    manager.select(f'{123:032x}', False)
+    assert manager.selectedCount == 0 and model.selected_bytes == 0
+
+
+def test_storage_report_is_visible_without_discarding_good_rows(controller):
+    from thsr_ticket.unittest.test_record_scanning import make_run
+    good = make_run(controller.path, 1)
+    broken = make_run(controller.path, 2)
+    (broken / 'events.jsonl').write_bytes(b'broken')
+    controller.prepareStorage()
+    finish_storage(controller)
+    assert [item['id'] for item in controller.storage.rows] == [good.name]
+    assert '可處理 1' in controller.storage.scanSummary
+    assert '略過 1' in controller.storage.scanSummary
+    assert controller.storage.scanReasons[0]['code'] == 'malformed'
+    assert not controller.storage.error
+
+
+def test_obsolete_booking_load_is_discarded_after_switch(controller, monkeypatch):
+    import threading
+    entered, release = threading.Event(), threading.Event()
+    first = controller.path
+    second = first.with_name('other.json')
+    seen = []
+
+    def read(config, cancel=None, report=None):
+        seen.append(threading.get_ident())
+        if config == first:
+            entered.set()
+            assert release.wait(timeout=5)
+            return [{'code': 'OLD'}]
+        return [{'code': 'NEW'}]
+
+    monkeypatch.setattr('thsr_ticket.desktop.record_loader.record_entries', read)
+    controller.refresh()
+    assert entered.wait(timeout=5)
+    controller.path = second
+    controller.refresh()
+    assert controller.records == []
+    release.set()
+    finish_records(controller)
+    assert controller.records == [{'code': 'NEW'}]
+    assert all(identifier != threading.get_ident() for identifier in seen)
+
+
+def test_repeated_record_refreshes_coalesce(controller, monkeypatch):
+    import threading
+    entered, release = threading.Event(), threading.Event()
+    reads = []
+
+    def read(config, cancel=None, report=None):
+        reads.append(config)
+        if len(reads) == 1:
+            entered.set()
+            assert release.wait(timeout=5)
+        return []
+
+    monkeypatch.setattr('thsr_ticket.desktop.record_loader.record_entries', read)
+    controller.refresh()
+    assert entered.wait(timeout=5)
+    for _ in range(20):
+        controller.refresh()
+    release.set()
+    finish_records(controller)
+    assert len(reads) == 2
+
+
+def test_booking_cards_are_paginated(qt, controller):
+    controller.navigate(3)
+    finish_records(controller)
+    engine = QQmlApplicationEngine()
+    warnings = []
+    engine.warnings.connect(lambda errors: warnings.extend(str(error) for error in errors))
+    engine.setInitialProperties({'backend': controller})
+    qml = Path(__file__).parents[1] / 'desktop' / 'qml' / 'Main.qml'
+    engine.load(QUrl.fromLocalFile(str(qml)))
+    assert engine.rootObjects(), warnings
+    window = engine.rootObjects()[0]
+    controller._records = [{'current': True, 'status': 'booked', 'code': f'DEMO{index}', 'ticket': {}}
+                           for index in range(101)]
+    controller.changed.emit()
+    for _ in range(10):
+        qt.processEvents()
+    assert window.property('recordPageCount') == 5
+    assert window.findChild(QObject, 'bookingCards').property('count') == 25
+    window.setProperty('recordPage', 4)
+    for _ in range(10):
+        qt.processEvents()
+    assert window.findChild(QObject, 'bookingCards').property('count') == 1
+    assert not warnings
+    window.setProperty('allowClose', True)
+    window.close()
 
 
 def test_diagnostic_cancel_and_config_destination_are_safe(controller, tmp_path, monkeypatch):
@@ -267,6 +395,7 @@ def test_resolve_pending_clears_recovery_without_erasing_history(controller):
     save_task(controller.path, 'booking_unconfirmed', False)
     controller.refresh()
     controller.resolve(pending_fingerprint(controller.path), 'not_booked', '', True)
+    finish_records(controller)
     assert controller.task['code'] == 'finished'
     assert controller.task['can_book']
     assert any(row.get('resolution') == 'not_booked' for row in controller.records)
@@ -299,6 +428,7 @@ def test_cancellation_link_does_not_change_state(controller, monkeypatch):
     state.write_text('{"status":"booked","booking_codes":["TEST1234"]}')
     original = state.read_bytes()
     controller.refresh()
+    finish_records(controller)
     opened = Mock(return_value=True)
     monkeypatch.setattr('thsr_ticket.desktop.controller.QDesktopServices.openUrl', opened)
     assert not controller.openCancellation('OTHER')
@@ -359,6 +489,8 @@ def test_controller_stops_cooperatively_and_prevents_second_start(controller):
     ready = Mock()
     controller.closeReady.connect(ready)
     controller.poll()
+    finish_records(controller)
+    controller.poll()
     ready.assert_called_once()
     controller.worker.assert_called_once()
 
@@ -370,6 +502,7 @@ def test_controller_pending_requires_verified_resolution(controller):
     controller.resolve(fingerprint, 'not_booked', '', False)
     assert state.exists() and controller.error
     controller.resolve(fingerprint, 'not_booked', '', True)
+    finish_records(controller)
     assert not state.exists()
     assert controller.records[0]['status'] == 'resolved'
 
