@@ -9,6 +9,10 @@ from datetime import datetime, timedelta, timezone
 from thsr_ticket.booking_records import record_paths
 from thsr_ticket.record_lock import record_lock
 from thsr_ticket.record_schema import validate_record
+from thsr_ticket.storage_errors import StorageError
+from thsr_ticket.storage_journal import (
+    execute, require_resolved, directory_signature, incomplete_batches, pending_operations,
+)
 
 
 def linked(path):
@@ -28,7 +32,9 @@ def inventory(config_path, cancel=None, progress=None):
     state, runs = record_paths(config_path)
     items = []
     # Any outstanding state blocks cleanup, including corrupt or unknown state.
-    if state.exists() or linked(runs):
+    if linked(runs):
+        raise StorageError('unsafe_path')
+    if state.exists() or pending_operations(config_path):
         return items
     for index, directory in enumerate(runs.glob('*')):
         check_cancel(cancel)
@@ -74,25 +80,16 @@ def inventory(config_path, cancel=None, progress=None):
 def move_history(config_path, expected):
     state, runs = record_paths(config_path)
     with record_lock(state):
+        require_resolved(config_path)
+        if state.exists():
+            raise StorageError('booking_guard')
         current = {item['id']: item for item in inventory(config_path)}
         if (not expected or len({item['id'] for item in expected}) != len(expected)
                 or any(current.get(item['id']) != item for item in expected)):
-            raise ValueError('紀錄已變更或仍有待處理訂位，請重新預覽。')
-        destination = runs.parent / (runs.name + '.history-backups') / uuid4().hex
-        if linked(destination.parent):
-            raise ValueError('備份目錄不可為連結。')
-        destination.mkdir(parents=True, exist_ok=False)
-        moved = []
-        try:
-            for item in expected:
-                source = runs / item['id']
-                source.rename(destination / source.name)
-                moved.append(source.name)
-        except OSError:
-            for name in reversed(moved):
-                (destination / name).rename(runs / name)
-            raise
-        return destination
+            raise StorageError('records_changed')
+        batch = uuid4().hex
+        execute(config_path, 'move', batch, expected)
+        return runs.parent / (runs.name + '.history-backups') / batch
 
 
 def restore_history(config_path, destination):
@@ -100,32 +97,29 @@ def restore_history(config_path, destination):
     destination = Path(destination)
     root = runs.parent / (runs.name + '.history-backups')
     with record_lock(state):
+        require_resolved(config_path)
         if (destination.parent != root or linked(root) or linked(destination) or linked(runs)
                 or not re.fullmatch('[0-9a-f]{32}', destination.name)):
-            raise ValueError('無效的備份位置。')
+            raise StorageError('unsafe_path')
         sources = list(destination.iterdir())
-        if any(linked(p) or not p.is_dir() or not re.fullmatch('[0-9a-f]{32}', p.name)
-               or (runs / p.name).exists() for p in sources):
-            raise ValueError('紀錄已存在或備份格式異常，未還原。')
-        runs.mkdir(parents=True, exist_ok=True)
-        moved = []
-        try:
-            for source in sources:
-                source.rename(runs / source.name)
-                moved.append(source.name)
-        except OSError:
-            for name in reversed(moved):
-                (runs / name).rename(destination / name)
-            raise
-        destination.rmdir()
+        if not sources or any(linked(p) or not p.is_dir() or not re.fullmatch('[0-9a-f]{32}', p.name)
+                              for p in sources):
+            raise StorageError('backup_invalid')
+        if any((runs / p.name).exists() or linked(runs / p.name) for p in sources):
+            raise StorageError('restore_conflict')
+        entries = [directory_signature(source) for source in sources]
+        execute(config_path, 'restore', destination.name, entries)
 
 
 def latest_backup(config_path):
     _, runs = record_paths(config_path)
     root = runs.parent / (runs.name + '.history-backups')
     if linked(root):
-        raise ValueError('備份目錄不可為連結。')
-    candidates = [p for p in root.glob('*') if p.is_dir() and not linked(p)
+        raise StorageError('unsafe_path')
+    excluded = incomplete_batches(config_path)
+    if excluded is None:
+        return None
+    candidates = [p for p in root.glob('*') if p.name not in excluded and p.is_dir() and not linked(p)
                   and re.fullmatch('[0-9a-f]{32}', p.name) and any(p.iterdir())]
     return max(candidates, key=lambda p: p.stat().st_mtime_ns) if candidates else None
 
@@ -134,11 +128,14 @@ def backup_batches(config_path, cancel=None):
     _, runs = record_paths(config_path)
     root = runs.parent / (runs.name + '.history-backups')
     if linked(root):
-        raise ValueError('備份目錄不可為連結。')
+        raise StorageError('unsafe_path')
+    excluded = incomplete_batches(config_path)
+    if excluded is None:
+        return []
     items = []
     for path in root.glob('*'):
         check_cancel(cancel)
-        if linked(path) or not path.is_dir() or not re.fullmatch('[0-9a-f]{32}', path.name):
+        if path.name in excluded or linked(path) or not path.is_dir() or not re.fullmatch('[0-9a-f]{32}', path.name):
             continue
         children = list(path.iterdir())
         if not children or any(linked(p) or not p.is_dir() or not re.fullmatch('[0-9a-f]{32}', p.name)

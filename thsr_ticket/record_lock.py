@@ -4,6 +4,10 @@ from contextlib import contextmanager
 from pathlib import Path
 
 
+class RecordBusy(RuntimeError):
+    """A second process holds this config's operation lock."""
+
+
 @contextmanager
 def record_lock(state_path):
     lock_path = Path(state_path).with_suffix('.operation.lock')
@@ -21,7 +25,7 @@ def record_lock(state_path):
                 import fcntl
                 fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:
-            raise RuntimeError('此設定仍有訂票或紀錄操作執行中，請先停止並等待結束。') from None
+            raise RecordBusy('此設定仍有訂票或紀錄操作執行中，請先停止並等待結束。') from None
         try:
             yield
         finally:
