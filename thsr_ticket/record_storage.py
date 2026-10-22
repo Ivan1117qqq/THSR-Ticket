@@ -8,72 +8,96 @@ from datetime import datetime, timedelta, timezone
 
 from thsr_ticket.booking_records import record_paths
 from thsr_ticket.record_lock import record_lock
-from thsr_ticket.record_schema import validate_record
+from thsr_ticket.record_schema import validate_record, RecordVersionError
+from thsr_ticket.scan_report import ScanReport, check_cancel
+from thsr_ticket.scan_report import ScanCancelled as ScanCancelled
 from thsr_ticket.storage_errors import StorageError
 from thsr_ticket.storage_journal import (
     execute, require_resolved, directory_signature, incomplete_batches, pending_operations,
 )
+
+__all__ = ['inventory', 'move_history', 'restore_history', 'latest_backup', 'backup_batches', 'ScanCancelled']
 
 
 def linked(path):
     return path.is_symlink() or getattr(path, "is_junction", lambda: False)()
 
 
-class ScanCancelled(Exception):
-    pass
+class RunSkipped(ValueError):
+    def __init__(self, reason):
+        self.reason = reason
 
 
-def check_cancel(cancel):
-    if cancel is not None and cancel.is_set():
-        raise ScanCancelled()
+def inspect_run(directory, cancel=None):
+    check_cancel(cancel)
+    if linked(directory):
+        raise RunSkipped('linked')
+    if not directory.is_dir():
+        raise RunSkipped('unsupported')
+    files = sorted(directory.iterdir())
+    if any(linked(p) for p in files):
+        raise RunSkipped('linked')
+    if not files or any(not p.is_file() or p.name not in ('events.jsonl', 'result.json') for p in files):
+        raise RunSkipped('unsupported')
+    if not any(p.name == 'events.jsonl' for p in files):
+        raise RunSkipped('unfinished')
+    digest, size, last = hashlib.sha256(), 0, {}
+    for path in files:
+        digest.update(path.name.encode() + b'\0')
+        with path.open('rb') as handle:
+            if path.name == 'events.jsonl':
+                for line in handle:
+                    check_cancel(cancel)
+                    digest.update(line)
+                    size += len(line)
+                    last = validate_record(json.loads(line))
+            else:
+                content = handle.read()
+                check_cancel(cancel)
+                digest.update(content)
+                size += len(content)
+                validate_record(json.loads(content))
+    if last.get('event') not in ('run_finished', 'run_stopped'):
+        raise RunSkipped('unfinished')
+    date = datetime.fromtimestamp((directory / 'events.jsonl').stat().st_mtime, timezone(timedelta(hours=8)))
+    return {'id': directory.name, 'bytes': size, 'digest': digest.hexdigest(),
+            'date': date.strftime('%Y-%m-%d %H:%M:%S')}
 
 
-def inventory(config_path, cancel=None, progress=None):
+def inventory(config_path, cancel=None, progress=None, report=None):
     state, runs = record_paths(config_path)
-    items = []
-    # Any outstanding state blocks cleanup, including corrupt or unknown state.
+    report = report if report is not None else ScanReport()
     if linked(runs):
         raise StorageError('unsafe_path')
     if state.exists() or pending_operations(config_path):
-        return items
-    for index, directory in enumerate(runs.glob('*')):
-        check_cancel(cancel)
-        if progress and index % 20 == 0:
-            progress(index)
-        if not re.fullmatch('[0-9a-f]{32}', directory.name) or linked(directory) or not directory.is_dir():
-            continue
-        files = sorted(directory.iterdir())
-        if not files or any(linked(p) or not p.is_file() or p.name not in
-                            ('events.jsonl', 'result.json') for p in files):
-            continue
-        try:
-            events = directory / 'events.jsonl'
-            if not events.exists():
-                continue
-            last = {}
-            with events.open(encoding='utf-8') as handle:
-                for line in handle:
-                    check_cancel(cancel)
-                    last = validate_record(json.loads(line))
-            if last.get('event') not in ('run_finished', 'run_stopped'):
-                continue
-            result = directory / 'result.json'
-            if result.exists():
-                validate_record(json.loads(result.read_text(encoding='utf-8')))
-        except (ValueError, UnicodeError):
-            continue
-        digest = hashlib.sha256()
-        size = 0
-        for path in files:
-            digest.update(path.name.encode() + b'\0')
-            with path.open('rb') as handle:
-                while chunk := handle.read(1024 * 1024):
-                    check_cancel(cancel)
-                    size += len(chunk)
-                    digest.update(chunk)
-        date = datetime.fromtimestamp(events.stat().st_mtime, timezone(timedelta(hours=8)))
-        date = date.strftime('%Y-%m-%d %H:%M:%S')
-        items.append({'id': directory.name, 'bytes': size, 'digest': digest.hexdigest(), 'date': date})
+        return []
+    items = []
+    try:
+        directories = runs.iterdir()
+        for index, directory in enumerate(directories):
+            check_cancel(cancel)
+            if progress and index % 20 == 0:
+                progress(index)
+            if directory.name == 'archives':
+                continue  # A separate record type, outside this cleanup scope.
+            try:
+                if not re.fullmatch('[0-9a-f]{32}', directory.name):
+                    raise RunSkipped('unsupported')
+                item = inspect_run(directory, cancel)
+            except RunSkipped as error:
+                report.skip(error.reason)
+            except RecordVersionError:
+                report.skip('version')
+            except (ValueError, UnicodeError):
+                report.skip('malformed')
+            except OSError as error:
+                report.failure(error)
+            else:
+                items.append(item)
+                report.accepted += 1
+    except FileNotFoundError:
+        if runs.exists():
+            raise
     return sorted(items, key=lambda item: item['id'])
 
 
@@ -83,10 +107,19 @@ def move_history(config_path, expected):
         require_resolved(config_path)
         if state.exists():
             raise StorageError('booking_guard')
-        current = {item['id']: item for item in inventory(config_path)}
-        if (not expected or len({item['id'] for item in expected}) != len(expected)
-                or any(current.get(item['id']) != item for item in expected)):
+        if (not expected or any(not isinstance(item.get('id'), str)
+                                or not re.fullmatch('[0-9a-f]{32}', item['id']) for item in expected)
+                or len({item['id'] for item in expected}) != len(expected)):
             raise StorageError('records_changed')
+        if linked(runs):
+            raise StorageError('unsafe_path')
+        for item in expected:
+            try:
+                current = inspect_run(runs / item['id'])
+            except (ValueError, UnicodeError):
+                raise StorageError('records_changed') from None
+            if current != item:
+                raise StorageError('records_changed')
         batch = uuid4().hex
         execute(config_path, 'move', batch, expected)
         return runs.parent / (runs.name + '.history-backups') / batch
@@ -124,24 +157,41 @@ def latest_backup(config_path):
     return max(candidates, key=lambda p: p.stat().st_mtime_ns) if candidates else None
 
 
-def backup_batches(config_path, cancel=None):
+def backup_batches(config_path, cancel=None, report=None):
     _, runs = record_paths(config_path)
     root = runs.parent / (runs.name + '.history-backups')
+    report = report if report is not None else ScanReport()
     if linked(root):
         raise StorageError('unsafe_path')
     excluded = incomplete_batches(config_path)
     if excluded is None:
         return []
     items = []
-    for path in root.glob('*'):
-        check_cancel(cancel)
-        if path.name in excluded or linked(path) or not path.is_dir() or not re.fullmatch('[0-9a-f]{32}', path.name):
-            continue
-        children = list(path.iterdir())
-        if not children or any(linked(p) or not p.is_dir() or not re.fullmatch('[0-9a-f]{32}', p.name)
-                               for p in children):
-            continue
-        items.append({'id': path.name, 'count': len(children),
-                      'date': datetime.fromtimestamp(path.stat().st_mtime, timezone(timedelta(hours=8)))
-                      .strftime('%Y-%m-%d %H:%M:%S')})
+    try:
+        for path in root.iterdir():
+            check_cancel(cancel)
+            if path.name in excluded:
+                continue
+            try:
+                if linked(path):
+                    raise RunSkipped('linked')
+                if not path.is_dir() or not re.fullmatch('[0-9a-f]{32}', path.name):
+                    raise RunSkipped('unsupported')
+                children = list(path.iterdir())
+                if not children:
+                    continue  # Empty transaction directories contain no backup records.
+                if any(linked(p) for p in children):
+                    raise RunSkipped('linked')
+                if any(not p.is_dir() or not re.fullmatch('[0-9a-f]{32}', p.name) for p in children):
+                    raise RunSkipped('unsupported')
+                date = datetime.fromtimestamp(path.stat().st_mtime, timezone(timedelta(hours=8)))
+                items.append({'id': path.name, 'count': len(children), 'date': date.strftime('%Y-%m-%d %H:%M:%S')})
+                report.accepted += 1
+            except RunSkipped as error:
+                report.skip(error.reason)
+            except OSError as error:
+                report.failure(error)
+    except FileNotFoundError:
+        if root.exists():
+            raise
     return sorted(items, key=lambda item: (item['date'], item['id']), reverse=True)

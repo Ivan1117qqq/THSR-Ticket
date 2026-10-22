@@ -8,7 +8,8 @@ from uuid import uuid4
 
 from thsr_ticket.run_records import timestamp, atomic_json
 from thsr_ticket.record_lock import record_lock
-from thsr_ticket.record_schema import validate_record
+from thsr_ticket.record_schema import validate_record, RecordVersionError
+from thsr_ticket.scan_report import ScanReport, check_cancel, children
 
 
 def record_paths(config_path):
@@ -156,12 +157,15 @@ def resolve_pending(config_path, outcome, expected_fingerprint, confirmed=False,
         return directory
 
 
-def record_entries(config_path):
+def record_entries(config_path, cancel=None, report=None):
     """Structured view for the desktop; never includes passenger credentials."""
     state, runs = record_paths(config_path)
     entries = []
+    by_code = {}
+    report = report if report is not None else ScanReport()
     active_codes = []
     if state.exists():
+        check_cancel(cancel)
         try:
             current = read_object(state)
             if current.get('status') == 'booked':
@@ -174,26 +178,75 @@ def record_entries(config_path):
                                 'ticket': {'date': str(current.get('outbound_date', '—')),
                                            'train_id': str(current.get('train_id', '—'))},
                                 'fingerprint': pending_fingerprint(config_path)})
-        except (ValueError, OSError):
+            report.accepted += 1
+        except RecordVersionError:
+            report.skip('version')
             entries.append({'status': 'unreadable', 'code': '', 'current': True, 'ticket': {}})
-    for path in sorted(runs.glob('*/result.json'), key=lambda item: item.stat().st_mtime, reverse=True):
+        except (ValueError, UnicodeError):
+            report.skip('malformed')
+            entries.append({'status': 'unreadable', 'code': '', 'current': True, 'ticket': {}})
+        except OSError as error:
+            report.failure(error)
+            entries.append({'status': 'unreadable', 'code': '', 'current': True, 'ticket': {}})
+    by_code.update((item['code'], item) for item in entries if item['code'])
+    results = []
+    for directory in children(runs):
+        check_cancel(cancel)
+        try:
+            if directory.name == 'archives' or not directory.is_dir():
+                continue
+            if directory.is_symlink() or getattr(directory, 'is_junction', lambda: False)():
+                report.skip('linked')
+                continue
+            path = directory / 'result.json'
+            if path.is_symlink():
+                report.skip('linked')
+                continue
+            results.append((path.stat().st_mtime_ns, str(path), path))
+        except FileNotFoundError:
+            continue  # Runs without a booking result are normal query attempts.
+        except OSError as error:
+            report.failure(error)
+    for _, _, path in sorted(results, reverse=True):
+        check_cancel(cancel)
         try:
             data = read_object(path)
-            for ticket in data.get('tickets', []):
+            tickets = data.get('tickets')
+            if not isinstance(tickets, list) or not tickets or any(
+                    not isinstance(ticket, dict) or not isinstance(ticket.get('id'), str) or not ticket['id']
+                    for ticket in tickets):
+                raise ValueError('Invalid ticket result')
+            for ticket in tickets:
                 if not isinstance(ticket, dict) or not ticket.get('id'):
                     continue
-                match = next((item for item in entries if item['code'] == ticket['id']), None)
+                match = by_code.get(ticket['id'])
                 if match is None:
                     match = {'status': 'history', 'code': ticket['id'], 'current': False, 'ticket': {}}
                     entries.append(match)
+                    by_code[ticket['id']] = match
                 if not match['ticket']:
                     match['ticket'] = {key: str(ticket.get(key, '')) for key in (
                         'date', 'start_station', 'dest_station', 'train_id', 'depart_time', 'arrival_time',
                         'seat', 'seat_class', 'price', 'payment_deadline', 'ticket_num_info')}
-        except (ValueError, OSError, TypeError):
-            continue
-    for path in sorted(runs.glob('archives/*/state.json')):
+            report.accepted += 1
+        except RecordVersionError:
+            report.skip('version')
+        except (ValueError, TypeError, UnicodeError):
+            report.skip('malformed')
+        except OSError as error:
+            report.failure(error)
+    try:
+        archives = sorted(children(runs / 'archives'))
+    except OSError as error:
+        report.failure(error)
+        archives = []
+    for directory in archives:
+        check_cancel(cancel)
         try:
+            if directory.is_symlink() or getattr(directory, 'is_junction', lambda: False)():
+                report.skip('linked')
+                continue
+            path = directory / 'state.json'
             data = read_object(path)
             codes = data.get('booking_codes', [])
             resolution = path.parent / 'resolution.json'
@@ -201,10 +254,13 @@ def record_entries(config_path):
                 resolved = read_object(resolution)
                 code = resolved.get('booking_code', '')
                 if code and resolved.get('outcome') == 'cancelled':
-                    match = next((item for item in entries if item['code'] == code and not item['current']), None)
+                    match = by_code.get(code)
+                    if match and match['current']:
+                        match = None
                     if match is not None:
                         match.update(status='resolved', resolution='cancelled',
                                      confirmed_at=resolved.get('confirmed_at', ''))
+                        report.accepted += 1
                         continue
                 entries.append({'status': 'resolved', 'code': code, 'current': False,
                                 'ticket': {'date': str(data.get('outbound_date', '')),
@@ -213,10 +269,17 @@ def record_entries(config_path):
                                 'confirmed_at': resolved.get('confirmed_at', '')})
             else:
                 for code in codes:
-                    if not any(item['code'] == code for item in entries):
-                        entries.append({'status': 'history', 'code': code, 'current': False, 'ticket': {}})
-        except (ValueError, OSError, TypeError):
-            continue
+                    if code not in by_code:
+                        entry = {'status': 'history', 'code': code, 'current': False, 'ticket': {}}
+                        entries.append(entry)
+                        by_code[code] = entry
+            report.accepted += 1
+        except RecordVersionError:
+            report.skip('version')
+        except (ValueError, TypeError, UnicodeError):
+            report.skip('malformed')
+        except OSError as error:
+            report.failure(error)
     return entries
 
 
