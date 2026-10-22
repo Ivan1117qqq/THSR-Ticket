@@ -1,0 +1,3 @@
+include requirements*.txt
+recursive-include thsr_ticket/desktop/qml *.qml
+recursive-include thsr_ticket/desktop/assets *.svg

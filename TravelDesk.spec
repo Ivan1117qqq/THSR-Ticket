@@ -2,8 +2,10 @@
 from pathlib import Path
 from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
 from scripts.build_icon import build_icon
+from scripts.release_metadata import prepare
 
 root = Path(SPECPATH)
+prepare(root)
 datas = [(str(root / 'thsr_ticket/desktop/qml'), 'thsr_ticket/desktop/qml')]
 datas += [(str(root / 'thsr_ticket/desktop/assets'), 'thsr_ticket/desktop/assets')]
 icon = build_icon(root)
@@ -16,5 +18,5 @@ a = Analysis(
 )
 pyz = PYZ(a.pure)
 exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name='TravelDesk', console=False, icon=icon,
-          version=str(root / 'installer/version_info.txt'))
+          version=str(root / 'build/release/version_info.txt'))
 coll = COLLECT(exe, a.binaries, a.datas, name='TravelDesk')
