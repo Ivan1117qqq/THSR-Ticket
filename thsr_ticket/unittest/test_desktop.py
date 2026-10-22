@@ -151,6 +151,63 @@ def test_close_waits_for_storage_work(controller):
     closed.assert_called_once()
 
 
+def test_storage_error_has_specific_guidance(controller, monkeypatch):
+    def fail(*args):
+        raise PermissionError('PRIVATE-BOOKING-PATH')
+
+    monkeypatch.setattr('thsr_ticket.desktop.storage.inventory', fail)
+    controller.prepareStorage()
+    finish_storage(controller)
+    assert controller.storage.error['code'] == 'permission_denied'
+    assert controller.storage.error['guidance']
+    assert 'PRIVATE-BOOKING-PATH' not in controller.storage.message
+    assert 'PRIVATE-BOOKING-PATH' not in json.dumps(controller.storage.error)
+
+
+def test_reopen_detects_and_recovers_interrupted_batch(qt, tmp_path):
+    from thsr_ticket.booking_records import record_paths
+    from thsr_ticket.run_records import atomic_json, timestamp
+    from thsr_ticket.storage_journal import directory_signature
+    config = tmp_path / 'booking.local.json'
+    state, runs = record_paths(config)
+    directory = runs / ('a' * 32)
+    directory.mkdir(parents=True)
+    (directory / 'events.jsonl').write_bytes(b'{"event":"run_finished"}\n')
+    signature = directory_signature(directory)
+    backup = runs.parent / (runs.name + '.history-backups') / ('b' * 32)
+    backup.mkdir(parents=True)
+    directory.rename(backup / directory.name)
+    journal = runs.parent / (runs.name + '.operations')
+    journal.mkdir()
+    atomic_json(journal / ('c' * 32 + '.json'), {
+        'version': 1, 'status': 'pending', 'action': 'move', 'batch': backup.name,
+        'entries': [signature], 'created_at': timestamp(),
+    })
+    instance = DesktopController(tmp_path, worker=Mock())
+    detected = Mock()
+    instance.storageRecoveryDetected.connect(detected)
+    try:
+        qt.processEvents()  # Startup schedules a background journal inspection.
+        finish_storage(instance)
+        assert instance.storage.hasRecovery
+        detected.assert_called()
+        assert not directory.exists()  # Detection never moves data without confirmation.
+        instance.storage.recover('c' * 32)
+        finish_storage(instance)
+        assert directory.exists()
+        assert not instance.storage.hasRecovery
+        assert not state.exists()
+    finally:
+        instance.timer.stop()
+        instance.storage._timer.stop()
+
+
+def test_invalid_recovery_is_read_only_in_gui(controller):
+    controller.storage._recoveries = [{'id': 'a' * 32, 'recoverable': False}]
+    controller.storage.recover('a' * 32)
+    assert not controller.storage.busy
+
+
 def test_diagnostic_cancel_and_config_destination_are_safe(controller, tmp_path, monkeypatch):
     controller.prepareDiagnostics()
     target = tmp_path / 'booking.local.json'

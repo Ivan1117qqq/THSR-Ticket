@@ -68,6 +68,7 @@ class DesktopController(QObject):
     closeReady = Signal()
     resetSecrets = Signal()
     confirmRequested = Signal(str)
+    storageRecoveryDetected = Signal()
 
     def __init__(self, data_dir, worker=run_background):
         super().__init__()
@@ -100,6 +101,7 @@ class DesktopController(QObject):
         self._storage = StorageManager(self)
         self._storage.changed.connect(self.changed.emit)
         self._storage.mutated.connect(self.refresh)
+        self._storage.recoveryFound.connect(self.storageRecoveryDetected.emit)
         self._storage_closing = False
         self._error = False
         self._issues = {}
@@ -122,6 +124,7 @@ class DesktopController(QObject):
         elif previous:
             self.notify('上次使用的設定已移動或不存在，請重新載入；不會自動建立另一份設定。', True)
         self.refresh()
+        QTimer.singleShot(0, self.checkStorageRecovery)
 
     @Property(str, notify=changed)
     def diagnosticPreview(self):
@@ -135,6 +138,15 @@ class DesktopController(QObject):
     def prepareStorage(self):
         if not self._running:
             self._storage.begin(self.path)
+
+    @Slot()
+    def checkStorageRecovery(self):
+        if self._running or self._storage.busy:
+            return
+        _, runs = record_paths(self.path)
+        root = runs.parent / (runs.name + '.operations')
+        if root.exists() or root.is_symlink():
+            self._storage.inspect(self.path)
 
     @Slot()
     def prepareDiagnostics(self):
@@ -343,6 +355,7 @@ class DesktopController(QObject):
             self._phase = self.task['title']
             self.notify('已載入設定，請核對日期與時間。')
             self.remember()
+            QTimer.singleShot(0, self.checkStorageRecovery)
             return True
         except ConfigVersionError as exc:
             self.notify(str(exc), True)

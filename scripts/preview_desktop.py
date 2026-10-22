@@ -79,6 +79,29 @@ def main():
             app.processEvents()
         if not window.grabWindow().save(str(destination / f'backups-scale-{args.scale}.png')):
             raise RuntimeError('Failed to save backup preview')
+        from thsr_ticket.run_records import atomic_json, timestamp
+        from thsr_ticket.storage_journal import directory_signature
+        journal_root = preview_runs.parent / (preview_runs.name + '.operations')
+        journal_root.mkdir()
+        atomic_json(journal_root / ('f' * 32 + '.json'), {
+            'version': 1, 'status': 'pending', 'action': 'move', 'batch': 'e' * 32,
+            'entries': [directory_signature(preview_runs / ('a' * 32))], 'created_at': timestamp(),
+        })
+        controller.prepareStorage()
+        controller.storage._thread.join(timeout=5)
+        controller.storage.poll()
+        for _ in range(30):
+            app.processEvents()
+        if not window.grabWindow().save(str(destination / f'interrupted-scale-{args.scale}.png')):
+            raise RuntimeError('Failed to save interrupted operation preview')
+        from thsr_ticket.storage_errors import error_info
+        controller.storage._error = error_info(PermissionError())
+        controller.storage._message = controller.storage.error['title']
+        controller.storage.changed.emit()
+        for _ in range(30):
+            app.processEvents()
+        if not window.grabWindow().save(str(destination / f'storage-error-scale-{args.scale}.png')):
+            raise RuntimeError('Failed to save storage error preview')
         QMetaObject.invokeMethod(window.findChild(QObject, 'storageDialog'), 'close')
         QMetaObject.invokeMethod(window.findChild(QObject, 'diagnosticDialog'), 'open')
         for _ in range(30):
