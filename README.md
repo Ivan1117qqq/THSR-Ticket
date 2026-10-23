@@ -6,9 +6,11 @@
 既有命令列流程已有使用者回報實站訂位成功；**新版 Qt 桌面介面目前完成離線驗證，尚未進行實站訂位驗收**。
 查詢速度取決於網頁載入、辨識及網站回應，不保證搶票成功。
 
-2026-10-23 原始碼已完成年月日滾輪、集中驗收工具、行程核對、搜尋索引／快取、Windows 視窗喚回及隔離 Chrome 關閉清理修正；最新本機完整驗證為 **493 項通過、1 項實站測試跳過**，包含十項實際瀏覽器測試。官網核對／取消與真實 OCR 準確率仍待指定測試資料；通知實際點擊與螢幕閱讀器仍需人工觀察。安裝包維持暫緩，操作見 [集中驗收清單](docs/acceptance.md)，交付範圍見 [確認文件](docs/optimization-audit.md)。
+2026-10-24 原始碼已新增常用行程範本、繳費期限提醒與首頁月曆待辦，保留既有年月日滾輪、行程核對、搜尋快取及防重送；最新本機完整驗證為 **534 項通過、1 項實站測試跳過**，包含十項實際瀏覽器測試。官網核對／取消與真實 OCR 準確率仍待指定測試資料；通知實際點擊與螢幕閱讀器仍需人工觀察。安裝包維持暫緩，操作見 [集中驗收清單](docs/acceptance.md)，交付範圍見 [確認文件](docs/optimization-audit.md)。
 
 ## 從頭學習與維護專案
+
+2026-10-24 新增常用行程範本、首頁待辦與月曆，以及開啟 App 期間的繳費期限提醒。範本不含日期或訂票人資料，期限不明時不猜測；操作與保存範圍見 [行程管理](docs/journey-planner.md)。
 
 - [集中驗收清單](docs/acceptance.md)：一鍵自動檢查、可操作的隔離假資料視窗，以及 U1–U7／L1–L2 的步驟與回報格式。
 - [完整開發與架構指南](docs/development-guide.md)：從入口、QML、背景執行緒到訂位、防重送、測試與打包，依程式執行順序逐段說明。
@@ -22,6 +24,7 @@
 - [完整備份與還原](docs/backup.md)：目前設定與關聯紀錄的封裝、新位置還原、衝突及防重送規則。
 - [優化交付與驗收邊界](docs/optimization-audit.md)：固定五項收尾結果，以及先前斷線核對、取消、重試、清理、介面效能與 OCR 的實作範圍。
 - [官網訂位核對與取消](docs/booking-management.md)：實驗性查詢同步與未付款單程取消流程，仍待實站驗收。
+- [常用行程與繳費提醒](docs/journey-planner.md)：範本管理、月曆待辦、明確期限提醒及全域資料保存範圍。
 
 ## 安裝
 
@@ -203,7 +206,7 @@ Qt 圖形介面可在「我的訂位」選取訂位後按「移至歷史」，�
 .\.venv\Scripts\python.exe -m flake8 -j1 --config .config/flake thsr_ticket
 ```
 
-2026-10-23 最新集中驗證：**493 項通過、1 項實站測試跳過**，Flake8 通過；十項瀏覽器測試已實際執行。另以真 Chrome 攔截全部請求驗證四種合成管理情境，並完成 10,000 筆 QML 量測、兩套模型載入、100／150% 預覽及三組原生視窗檢查；年月日滾輪亦涵蓋拖曳、滾動、重開、月底及取消。這些不代表實站取消已驗收。未加 `--browser-tests` 的一般回歸仍會跳過十項瀏覽器測試。既有 0.4.0 打包／升級證據保留，後續更新只在原始碼；外部驗收見 [專案驗證](docs/verification.md)。
+2026-10-24 最新集中驗證：**534 項通過、1 項實站測試跳過**，Flake8 通過；十項瀏覽器測試已實際執行。本輪增加 41 項範本、日期分類、提醒去重與 Qt 操作回歸，原生 Windows 補驗鍵盤開啟／套用範本及月曆切換。另以真 Chrome 攔截全部請求驗證四種合成管理情境，並完成 10,000 筆 QML 量測、兩套模型載入、100／150% 預覽及三組原生視窗檢查；年月日滾輪亦涵蓋拖曳、滾動、重開、月底及取消。這些不代表實站取消或實際通知點擊已驗收。未加 `--browser-tests` 的一般回歸仍會跳過十項瀏覽器測試。既有 0.4.0 打包／升級證據保留，後續更新只在原始碼；外部驗收見 [專案驗證](docs/verification.md)。
 測試涵蓋定時等待、次秒間隔、車次篩選、無票重查、成功停止與訂位結果不明時不重送。
 人工 HTML 與本機模擬不能取代實站驗證；Mypy、Pylint 與 CI 尚有待整理項目。
 push／PR 的 CI 設有 Linux 基礎測試與 Windows Qt 桌面測試。Windows 使用 `--require-desktop`，缺少桌面測試套件、整個測試模組未執行或桌面測試跳過都會失敗，選用瀏覽器與實站測試仍預設跳過。JUnit 報告保存在 workflow artifact。
@@ -227,6 +230,8 @@ push／PR 的 CI 設有 Linux 基礎測試與 Windows Qt 桌面測試。Windows 
 | 頁面、按鈕、欄位與對話框 | [Main.qml](thsr_ticket/desktop/qml/Main.qml)、[Field.qml](thsr_ticket/desktop/qml/Field.qml) 與同目錄共用元件 |
 | 介面事件、設定切換、背景任務 | [desktop/controller.py](thsr_ticket/desktop/controller.py)、[application.py](thsr_ticket/application.py) |
 | 設定分頁、診斷及桌面工具 | [SettingsPage.qml](thsr_ticket/desktop/qml/SettingsPage.qml)、[desktop/tools.py](thsr_ticket/desktop/tools.py) |
+| 常用行程範本 | [journey_templates.py](thsr_ticket/journey_templates.py)、[desktop/planner.py](thsr_ticket/desktop/planner.py)、[TemplateDialog.qml](thsr_ticket/desktop/qml/TemplateDialog.qml) |
+| 月曆、待辦與繳費提醒 | [journey_planning.py](thsr_ticket/journey_planning.py)、[JourneyCalendar.qml](thsr_ticket/desktop/qml/JourneyCalendar.qml)、[AgendaCard.qml](thsr_ticket/desktop/qml/AgendaCard.qml)、[DeadlineDialog.qml](thsr_ticket/desktop/qml/DeadlineDialog.qml) |
 | 完整備份、驗證及新位置還原 | [backup.py](thsr_ticket/backup.py)、[desktop/backup.py](thsr_ticket/desktop/backup.py)、[BackupDialog.qml](thsr_ticket/desktop/qml/BackupDialog.qml) |
 | 實驗性官網核對與未付款取消 | [official_booking.py](thsr_ticket/official_booking.py)、[booking_management.py](thsr_ticket/remote/booking_management.py)、[desktop/management.py](thsr_ticket/desktop/management.py)、[ManagementDialog.qml](thsr_ticket/desktop/qml/ManagementDialog.qml) |
 | 保留期限與永久純查票日誌清理 | [retention.py](thsr_ticket/retention.py)、[desktop/retention.py](thsr_ticket/desktop/retention.py)、[RetentionDialog.qml](thsr_ticket/desktop/qml/RetentionDialog.qml) |

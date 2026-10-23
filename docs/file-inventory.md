@@ -279,3 +279,20 @@
 `test_feature_desktop.py` 補驗隔離視窗的 Qt 指令不啟動 worker、不開官網，以及不能載入或改寫外部設定。`conftest.py`／`test_desktop_gate.py` 將這個新增功能測試模組納入必測；Windows CI 的 Flake8 改為涵蓋整個 scripts 目錄。
 
 日期回歸同樣位於 `test_feature_desktop.py`，涵蓋年月日三欄滾動方向、拖曳、閏年與月底、重開選取、取消及時間保留。`verify_desktop_session.py` 補實際 Windows 的相同操作及日期畫面擷取；`preview_desktop.py` 補搭車／啟動日期的 100／150% 預覽。
+
+## 2026-10-24 行程範本與提醒
+
+| 檔案 | 用途 |
+| --- | --- |
+| [docs/journey-planner.md](journey-planner.md) | 範本操作、月曆、繳費提醒、資料範圍及程式設計。 |
+| [thsr_ticket/journey_templates.py](../thsr_ticket/journey_templates.py) | 非個資欄位允許清單、範本驗證、版本與原子保存。 |
+| [thsr_ticket/journey_planning.py](../thsr_ticket/journey_planning.py) | 明確日期／期限解析、付款待辦分類及有上限的月曆索引。 |
+| [thsr_ticket/desktop/planner.py](../thsr_ticket/desktop/planner.py) | Qt 範本指令、提醒偏好、手動期限、跨重開去重及首頁模型。 |
+| [thsr_ticket/desktop/qml/TemplateDialog.qml](../thsr_ticket/desktop/qml/TemplateDialog.qml) | 範本新增、預覽、套用、重新命名、複製、更新與移除。 |
+| [thsr_ticket/desktop/qml/DeadlineDialog.qml](../thsr_ticket/desktop/qml/DeadlineDialog.qml) | 人工核對完整本機期限、年月日選取與保存同意。 |
+| [thsr_ticket/desktop/qml/JourneyCalendar.qml](../thsr_ticket/desktop/qml/JourneyCalendar.qml) | 月份切換、日期標記及當日有上限的行程列表。 |
+| [thsr_ticket/desktop/qml/AgendaCard.qml](../thsr_ticket/desktop/qml/AgendaCard.qml) | 繳費／核對待辦、剩餘時間及期限設定入口。 |
+| [thsr_ticket/unittest/test_journey_planning.py](../thsr_ticket/unittest/test_journey_planning.py) | 範本欄位排除、損壞保留、日期歧義、狀態分類與月曆上限。 |
+| [thsr_ticket/unittest/test_planner_desktop.py](../thsr_ticket/unittest/test_planner_desktop.py) | Qt 範本與期限實際操作、防重送不變、通知去重與偏好保存。 |
+
+既有 `record_loader.py` 在背景準備行程索引；`controller.py` 僅作資料與訊號交接；`preferences.py` 保存新增提醒選項。`preview_desktop.py` 補月曆、範本與提醒視窗，`verify_desktop_session.py` 補原生鍵盤操作；桌面必測包含新 Qt 測試模組。
