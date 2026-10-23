@@ -5,6 +5,7 @@ import shutil
 import socket
 import subprocess
 import tempfile
+import time
 from typing import Optional
 
 
@@ -33,10 +34,12 @@ class NativeBrowser:
         self.executable = browser_executable(channel)
         self.temp_root = Path(tempfile.gettempdir()).resolve()
         self.profile: Optional[Path] = None
+        self._owned_profile: Optional[Path] = None
         self.process: Optional[subprocess.Popen] = None
 
     def start(self) -> str:
         self.profile = Path(tempfile.mkdtemp(prefix='thsr-browser-', dir=self.temp_root)).resolve()
+        self._owned_profile = self.profile
         with socket.socket() as listener:
             listener.bind(('127.0.0.1', 0))
             port = listener.getsockname()[1]
@@ -69,13 +72,20 @@ class NativeBrowser:
                     self.process.wait(timeout=3)
         if self.profile is not None:
             # Never recursively delete a caller-supplied path or a real browser profile.
-            target = self.profile.resolve()
-            if target.parent != self.temp_root or not target.name.startswith('thsr-browser-'):
-                raise RuntimeError('拒絕清理非本程式建立的瀏覽器目錄。')
-            try:
-                shutil.rmtree(target)
-            except FileNotFoundError:
-                pass
-            except OSError:
-                # Browser child processes can briefly hold files on Windows.
-                print(f'暫存瀏覽器目錄仍被占用，未刪除：{target}')
+            for delay in (0, 0.1, 0.25, 0.5, 1):
+                if delay:
+                    time.sleep(delay)
+                target = self.profile.resolve()
+                if (target != self._owned_profile or target.parent != self.temp_root
+                        or not target.name.startswith('thsr-browser-') or self.profile.is_symlink()
+                        or getattr(self.profile, 'is_junction', lambda: False)()):
+                    raise RuntimeError('拒絕清理非本程式建立的瀏覽器目錄。')
+                try:
+                    shutil.rmtree(target)
+                    return
+                except FileNotFoundError:
+                    return
+                except OSError:
+                    # Only local cleanup retries; never repeat a request or kill other browsers.
+                    continue
+            print(f'暫存瀏覽器目錄仍被占用，未刪除：{target}')

@@ -53,7 +53,17 @@ class BrowserRequest(HTTPRequest):
     def close(self) -> None:
         try:
             if self.browser is not None:
-                self.browser.close()
+                if self.native is not None and self.browser.is_connected():
+                    try:
+                        # CDP-connected browser.close() disconnects; ask our isolated Chrome to exit first.
+                        self.browser.new_browser_cdp_session().send('Browser.close')
+                    except self.browser_error:
+                        pass  # Chrome may close the channel before acknowledging shutdown.
+                try:
+                    self.browser.close()
+                except self.browser_error:
+                    if self.native is None:
+                        raise
         finally:
             try:
                 if self.driver is not None:

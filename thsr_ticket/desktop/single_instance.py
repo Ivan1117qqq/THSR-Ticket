@@ -3,7 +3,7 @@ import hashlib
 import os
 from pathlib import Path
 
-from PySide6.QtCore import QLockFile, QObject, QThread, Signal
+from PySide6.QtCore import QLockFile, QObject, QThread, Signal, Qt
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 
 
@@ -61,9 +61,10 @@ class SingleInstance(QObject):
 
 
 def activate_window(window):
-    if window.isMinimized():
+    if window.windowState() == Qt.WindowMinimized:
         window.showNormal()
     else:
-        window.show()
+        # QWindow.show() can reset its configured state; keep maximized windows maximized.
+        window.setVisible(True)
     window.raise_()
     window.requestActivate()

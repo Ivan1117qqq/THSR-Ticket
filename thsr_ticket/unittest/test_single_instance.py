@@ -9,6 +9,8 @@ import pytest
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 pytest.importorskip('PySide6')
 from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtCore import Qt  # noqa: E402
+from PySide6.QtQuick import QQuickWindow  # noqa: E402
 from thsr_ticket.desktop.single_instance import SingleInstance, activate_window  # noqa: E402
 
 
@@ -82,12 +84,25 @@ def test_listener_failure_releases_lock(app, tmp_path, monkeypatch):
         replacement.close()
 
 
-@pytest.mark.parametrize('minimized', [False, True])
-def test_activation_preserves_normal_window_state(minimized):
-    window = Mock()
-    window.isMinimized.return_value = minimized
+@pytest.mark.parametrize('state', [Qt.WindowNoState, Qt.WindowMinimized, Qt.WindowMaximized])
+def test_activation_preserves_normal_window_state(state):
+    window = Mock(spec=QQuickWindow)
+    window.windowState.return_value = state
     activate_window(window)
-    assert window.showNormal.call_count == int(minimized)
-    assert window.show.call_count == int(not minimized)
+    assert window.showNormal.call_count == int(state == Qt.WindowMinimized)
+    assert window.setVisible.call_count == int(state != Qt.WindowMinimized)
     window.raise_.assert_called_once()
     window.requestActivate.assert_called_once()
+
+
+@pytest.mark.parametrize('state', [Qt.WindowNoState, Qt.WindowMinimized, Qt.WindowMaximized])
+def test_activation_with_real_quick_window_uses_qwindow_api(app, state):
+    window = QQuickWindow()
+    try:
+        window.setWindowState(state)
+        activate_window(window)
+        app.processEvents()
+        expected = Qt.WindowNoState if state == Qt.WindowMinimized else state
+        assert window.windowState() == expected and window.isVisible()
+    finally:
+        window.close()
