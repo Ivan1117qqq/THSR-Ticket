@@ -11,6 +11,8 @@ Button {
     font.pixelSize: 14
     font.bold: primary
     hoverEnabled: true
+    activeFocusOnTab: true
+    Accessible.name: text
     contentItem: Text {
         text: control.text
         font: control.font

@@ -17,6 +17,10 @@ ColumnLayout {
     spacing: 8
     Layout.fillWidth: true
     enabled: !backend.running
+    function focusInput() {
+        if (options.length > 0) combo.forceActiveFocus(Qt.TabFocusReason)
+        else input.forceActiveFocus(Qt.TabFocusReason)
+    }
     Connections {
         target: field.backend
         function onResetSecrets() { field.reveal = false; eye.requestPaint() }
@@ -29,6 +33,8 @@ ColumnLayout {
         TextField {
             id: input
             objectName: field.fieldKey
+            Accessible.name: field.label
+            Accessible.description: field.hint
             visible: field.options.length === 0
             Layout.fillWidth: true
             Layout.minimumWidth: 80
@@ -52,6 +58,9 @@ ColumnLayout {
         }
         ComboBox {
             id: combo
+            objectName: 'choice_' + field.fieldKey
+            Accessible.name: field.label
+            Accessible.description: field.hint
             visible: field.options.length > 0
             Layout.fillWidth: true
             implicitHeight: 44
@@ -67,7 +76,7 @@ ColumnLayout {
             implicitWidth: 44
             horizontalPadding: 0
             text: ''
-            Accessible.name: field.reveal ? '隱藏' : '顯示'
+            Accessible.name: (field.reveal ? '隱藏' : '顯示') + field.label
             ToolTip.visible: hovered
             ToolTip.text: field.reveal ? '隱藏數值' : '顯示數值'
             onClicked: { field.reveal = !field.reveal; eye.requestPaint() }
@@ -85,15 +94,16 @@ ColumnLayout {
             }
         }
         AppButton {
+            id:calendarButton
+            objectName: 'calendar_' + field.fieldKey
             visible: field.calendar; text: '日期'; horizontalPadding: 12
-            onClicked: {
-                let d = new Date(field.backend.form[field.fieldKey].slice(0,10) + 'T12:00:00')
-                if (isNaN(d.getTime())) d = new Date()
-                picker.year = d.getFullYear(); picker.month = d.getMonth(); picker.open()
-            }
+            Accessible.name: '選擇' + field.label
+            onClicked: if(dateLoader.item) dateLoader.item.openDate(field.backend.form[field.fieldKey])
         }
         AppButton {
+            objectName: 'time_' + field.fieldKey
             visible:field.timePicker; text:'時間'; horizontalPadding:12
+            Accessible.name: '選擇' + field.label + '的時間'
             onClicked:{
                 let parts = (field.fieldKey === 'start_at' ? input.text.slice(11) : input.text).split(':')
                 hours.value=Number(parts[0]) || 0; minutes.value=Number(parts[1]) || 0; seconds.value=Number(parts[2]) || 0
@@ -104,10 +114,14 @@ ColumnLayout {
             visible: field.numeric
             spacing: 0
             Button {
+                objectName: 'increase_' + field.fieldKey
+                Accessible.name: '增加' + field.label
                 text: '+'; implicitWidth: 32; implicitHeight: 22
                 onClicked: field.backend.setField(field.fieldKey, String(Number(input.text) + 1))
             }
             Button {
+                objectName: 'decrease_' + field.fieldKey
+                Accessible.name: '減少' + field.label
                 text: '-'; implicitWidth: 32; implicitHeight: 22
                 onClicked: field.backend.setField(field.fieldKey, String(Math.max(0, Number(input.text) - 1)))
             }
@@ -141,31 +155,18 @@ ColumnLayout {
             }
         }
     }
-    Popup {
-        id: picker
-        property int year: 2026
-        property int month: 0
-        parent: Overlay.overlay
-        anchors.centerIn: parent
-        modal: true
-        width: 350; height: 360; padding: 20
-        background: Rectangle { color: 'white'; radius: 16; border.color: '#dce3ec' }
-        ColumnLayout {
-            anchors.fill: parent
-            RowLayout {
-                AppButton { text: '‹'; onClicked: { if (picker.month === 0) {picker.month = 11; picker.year--} else picker.month-- } }
-                Text { text: picker.year + ' / ' + (picker.month + 1); Layout.fillWidth: true; horizontalAlignment: Text.AlignHCenter }
-                AppButton { text: '›'; onClicked: { if (picker.month === 11) {picker.month = 0; picker.year++} else picker.month++ } }
-            }
-            DayOfWeekRow { locale: Qt.locale('zh_TW'); Layout.fillWidth: true }
-            MonthGrid {
-                month: picker.month; year: picker.year; locale: Qt.locale('zh_TW')
-                Layout.fillWidth: true; Layout.fillHeight: true
-                onClicked: function(date) {
-                    let value = Qt.formatDate(date, 'yyyy-MM-dd')
-                    if (field.fieldKey === 'start_at') value += ' ' + (input.text.slice(11,19) || '00:00:00')
-                    field.backend.setField(field.fieldKey, value); picker.close()
+    Loader {
+        id:dateLoader
+        active:field.calendar
+        sourceComponent:Component {
+            DatePicker {
+                objectName:'datePicker_'+field.fieldKey
+                titleText:field.fieldKey === 'start_at' ? '選擇啟動日期' : '選擇'+field.label
+                onDateAccepted:function(value) {
+                    if(field.fieldKey === 'start_at') value += ' '+(input.text.slice(11,19) || '00:00:00')
+                    field.backend.setField(field.fieldKey,value)
                 }
+                onClosed:calendarButton.forceActiveFocus(Qt.PopupFocusReason)
             }
         }
     }

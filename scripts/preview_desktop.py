@@ -21,6 +21,8 @@ def main():
     from PySide6.QtWidgets import QApplication
     from PySide6.QtQml import QQmlApplicationEngine
     from PySide6.QtQuickControls2 import QQuickStyle
+    from PySide6.QtTest import QTest
+    from shiboken6 import delete as delete_qml
     from thsr_ticket.desktop.controller import DesktopController
 
     QQuickStyle.setStyle('Basic')
@@ -36,6 +38,8 @@ def main():
         while controller._record_loader.busy:
             controller._record_loader._thread.join(timeout=5)
             controller._record_loader.poll()
+        controller.tools.set_notification_support(True)
+        controller.tools.setNotifications(True)
         controller._form['personal_id'] = 'DEMO123456'
         engine = QQmlApplicationEngine()
         warnings = []
@@ -64,8 +68,26 @@ def main():
             frame = window.grabWindow()
             if not frame.save(str(destination / f'page-{page}-scale-{args.scale}.png')):
                 raise RuntimeError('Failed to save preview')
+        controller.navigate(1)
+        original_date = controller.form['outbound_date']
+        controller.setField('outbound_date', '2024-02-29')
+        for key in ('outbound_date', 'start_at'):
+            QMetaObject.invokeMethod(window.findChild(QObject, 'calendar_' + key), 'clicked')
+            QTest.qWait(180)
+            if not window.grabWindow().save(str(destination / f'date-{key}-scale-{args.scale}.png')):
+                raise RuntimeError('Failed to save date picker preview')
+            QMetaObject.invokeMethod(window.findChild(QObject, 'datePicker_' + key), 'close')
+            QTest.qWait(180)
+        controller.setField('outbound_date', original_date)
+        controller.navigate(4)
+        for section in range(3):
+            window.findChild(QObject, 'settingsPage').setProperty('section', section)
+            for _ in range(30):
+                app.processEvents()
+            if not window.grabWindow().save(str(destination / f'settings-{section}-scale-{args.scale}.png')):
+                raise RuntimeError('Failed to save settings preview')
         demo_record = controller._records[0]
-        controller.prepareDiagnostics()
+        controller.tools.prepareDiagnostics()
         from thsr_ticket.booking_records import record_paths
         _, preview_runs = record_paths(controller.path)
         for identifier in ('a' * 32, 'b' * 32):
@@ -132,16 +154,16 @@ def main():
             {'event': 'task_completed', 'outcome': 'network', 'phase': 'query'},
         ]
         history_path.write_text(''.join(json.dumps(event) + '\n' for event in demo_events), encoding='utf-8')
-        controller.prepareHistory()
-        controller.historyDiagnostics._thread.join(timeout=5)
-        controller.historyDiagnostics.poll()
-        controller.historyDiagnostics.select('runs/' + '3' * 32)
+        controller.tools.prepareHistory()
+        controller.tools.historyDiagnostics._thread.join(timeout=5)
+        controller.tools.historyDiagnostics.poll()
+        controller.tools.historyDiagnostics.select('runs/' + '3' * 32)
         QMetaObject.invokeMethod(window.findChild(QObject, 'historyDiagnosticsDialog'), 'open')
         for _ in range(30):
             app.processEvents()
         if not window.grabWindow().save(str(destination / f'history-scale-{args.scale}.png')):
             raise RuntimeError('Failed to save history preview')
-        controller.prepareHistoricalDiagnostics()
+        controller.tools.prepareHistoricalDiagnostics()
         QMetaObject.invokeMethod(window.findChild(QObject, 'diagnosticDialog'), 'open')
         for _ in range(30):
             app.processEvents()
@@ -155,7 +177,7 @@ def main():
             controller._record_loader.poll()
         controller._records = [demo_record]
         controller.changed.emit()
-        window.setProperty('selected', demo_record)
+        window.findChild(QObject, 'bookingActions').setProperty('selected', demo_record)
         QMetaObject.invokeMethod(window.findChild(QObject, 'cancellationDialog'), 'open')
         for _ in range(30):
             app.processEvents()
@@ -169,9 +191,80 @@ def main():
             app.processEvents()
         if not window.grabWindow().save(str(destination / f'recovery-scale-{args.scale}.png')):
             raise RuntimeError('Failed to save recovery preview')
+        controller.navigate(4)
+        window.findChild(QObject, 'settingsPage').setProperty('section', 1)
+        controller._form['personal_id'] = 'A123456789'
+        controller.save()
+        manager = controller.backup
+        manager.previewSource()
+        manager._thread.join(timeout=5)
+        assert not manager._thread.is_alive()
+        manager.poll()
+        assert manager.canExport
+        QMetaObject.invokeMethod(window.findChild(QObject, 'backupDialog'), 'open')
+        for _ in range(30):
+            app.processEvents()
+        QTest.qWait(160)
+        if not window.grabWindow().save(str(destination / f'full-backup-scale-{args.scale}.png')):
+            raise RuntimeError('Failed to save full backup preview')
+        from thsr_ticket.backup import export_backup
+        backup_archive = Path(temporary) / 'preview.thsr-backup.zip'
+        export_backup(manager._source, backup_archive)
+        manager._source = None
+        manager._archive_path = backup_archive
+        manager._target = Path(temporary) / 'restored-preview'
+        manager._preview_archive()
+        manager._thread.join(timeout=5)
+        assert not manager._thread.is_alive()
+        manager.poll()
+        window.findChild(QObject, 'backupTabs').setProperty('currentIndex', 1)
+        for _ in range(30):
+            app.processEvents()
+        QTest.qWait(160)
+        if not window.grabWindow().save(str(destination / f'full-restore-scale-{args.scale}.png')):
+            raise RuntimeError('Failed to save full restore preview')
+        manager.applyRestore()
+        manager._thread.join(timeout=5)
+        assert not manager._thread.is_alive()
+        manager.poll()
+        assert manager.restoredPath
+        for _ in range(30):
+            app.processEvents()
+        QTest.qWait(160)
+        if not window.grabWindow().save(str(destination / f'full-restored-scale-{args.scale}.png')):
+            raise RuntimeError('Failed to save restored preview')
+        QMetaObject.invokeMethod(window.findChild(QObject, 'backupDialog'), 'close')
+        management = controller.management
+        management._snapshot = {'code': '12345678', 'status': 'unpaid', 'trip_matches': True,
+                                'verified_at': '2099-01-15T08:00:00+08:00',
+                                'ticket': {'date': '2099-01-15', 'train_id': '0117',
+                                           'start_station': '台北', 'dest_station': '台中'}}
+        management._stage, management._message = 'review', '假資料示範：核對這筆訂位，再決定是否取消。'
+        management.changed.emit()
+        controller.retention._result = {'preview': True, 'count': 3, 'bytes': 8500025, 'days': 90,
+                                        'cutoff': '2098-10-15 08:00:00', 'protected': 2, 'skipped': 1,
+                                        'entries': [{'relative': 'booking.local.runs/' + str(i) * 32,
+                                                     'date': '2098-09-15 08:00:00', 'bytes': 2833341}
+                                                    for i in (1, 2, 3)]}
+        controller.retention.changed.emit()
+        metrics = {'samples': 100, 'exact_match_rate': 0.85, 'coverage': 0.9,
+                   'accepted_accuracy': 85 / 90, 'mean_inference_ms': 23.5}
+        controller.ocrLab._result = {'models': {'standard': metrics, 'beta': metrics}}
+        controller.ocrLab.changed.emit()
+        for name in ('managementDialog', 'retentionDialog', 'ocrLabDialog'):
+            popup = window.findChild(QObject, name)
+            QMetaObject.invokeMethod(popup, 'open')
+            for _ in range(30):
+                app.processEvents()
+            QTest.qWait(160)
+            if not window.grabWindow().save(str(destination / f'{name}-scale-{args.scale}.png')):
+                raise RuntimeError('Failed to save feature preview')
+            QMetaObject.invokeMethod(popup, 'close')
         window.setProperty('allowClose', True)
         window.close()
         controller.timer.stop()
+        controller.storage._timer.stop()
+        delete_qml(engine)
         if warnings:
             raise RuntimeError(warnings)
 

@@ -15,6 +15,7 @@ from PySide6 import QtSvg  # noqa: F401 - include SVG icon plugin in the desktop
 from thsr_ticket.desktop.controller import DesktopController
 from thsr_ticket.desktop.single_instance import SingleInstance, activate_window
 from thsr_ticket.desktop.notifications import DesktopNotifications
+from shiboken6 import delete as delete_qml
 from thsr_ticket.version import VERSION
 
 
@@ -70,10 +71,10 @@ def run_app(args, app, instance):
     notifications = None
     if not args.self_test:
         notifications = DesktopNotifications(app.windowIcon(), app)
-        controller.set_notification_support(notifications.available)
-        notifications.set_enabled(controller.notificationsEnabled)
-        controller.notificationsChanged.connect(notifications.set_enabled)
-        controller.desktopNotification.connect(notifications.publish)
+        controller.tools.set_notification_support(notifications.available)
+        notifications.set_enabled(controller.tools.notificationsEnabled)
+        controller.tools.notificationsChanged.connect(notifications.set_enabled)
+        controller.tools.desktopNotification.connect(notifications.publish)
 
         def open_notification(target):
             controller.openNotification(target)
@@ -103,6 +104,8 @@ def run_app(args, app, instance):
             report['error_type'] = type(exc).__name__
         Path(args.self_test).write_text(json.dumps(report, indent=2), encoding='utf-8')
         controller.timer.stop()
+        controller.storage._timer.stop()
+        delete_qml(engine)
         temporary.cleanup()
         required = ['qml', 'ocr_standard', 'ocr_beta', 'playwright_driver']
         if sys.platform == 'win32':
@@ -113,6 +116,9 @@ def run_app(args, app, instance):
     result = app.exec()
     if notifications:
         notifications.set_enabled(False)
+    controller.timer.stop()
+    controller.storage._timer.stop()
+    delete_qml(engine)  # Release QML bindings while their Python backend is still alive.
     if mutex:
         close_handle = ctypes.windll.kernel32.CloseHandle
         close_handle.argtypes = (wintypes.HANDLE,)

@@ -48,7 +48,7 @@ class DesktopNotifications(QObject):
             self.opened.emit(self.target)
 
     def publish(self, title, body, target):
-        if not self.enabled or not self.available or target not in ('records', 'progress'):
+        if not self.enabled or not self.available or target not in ('records', 'progress', 'settings'):
             return
         self.target = target
         self.tray.showMessage(title, body, QSystemTrayIcon.Information, 10000)

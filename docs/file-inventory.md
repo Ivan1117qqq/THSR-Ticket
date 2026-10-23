@@ -78,6 +78,8 @@
 | [pyproject.toml](../pyproject.toml) | PEP 517 建置後端與固定 setuptools 版本。 |
 | [docs/releasing.md](releasing.md) | 統一版本、依賴分類、建置與隔離安裝升級驗收。 |
 | [docs/history-diagnostics.md](history-diagnostics.md) | 歷史任務診斷、匯出範圍、桌面通知操作與背景工作設計。 |
+| [docs/desktop-ui.md](desktop-ui.md) | 設定分頁、測試通知、鍵盤操作、頁面與工具服務的分層說明。 |
+| [docs/backup.md](backup.md) | 完整備份及新資料夾還原、範圍、個資保護、衝突與中斷處理。 |
 | [scripts/release_metadata.py](../scripts/release_metadata.py) | 由單一版本來源產生 Windows 資源、安裝版本、hash 與發行資訊。 |
 | [scripts/installer_fixture.py](../scripts/installer_fixture.py) | 產生不同 AppId 的隔離安裝測試包，檢查 payload 版本。 |
 | [scripts/build_release.ps1](../scripts/build_release.ps1) | 串接桌面必測、打包、安裝編譯與發行資訊產生。 |
@@ -105,6 +107,8 @@
 | [thsr_ticket/config_store.py](../thsr_ticket/config_store.py) | 設定版本檢查、舊格式備份遷移、JSON 原子保存與 Windows DPAPI 欄位保護。 |
 | [thsr_ticket/unittest/test_config_store.py](../thsr_ticket/unittest/test_config_store.py) | 舊格式唯讀相容、首次備份、未知版本阻擋與失敗不覆寫測試。 |
 | [thsr_ticket/diagnostics.py](../thsr_ticket/diagnostics.py) | 診斷欄位與值的允許清單、事件上限及環境／狀態快照；不匯出原始日誌。 |
+| [thsr_ticket/backup.py](../thsr_ticket/backup.py) | 單份設定及關聯紀錄盤點、ZIP 封裝、雜湊／時間驗證及不覆寫還原。 |
+| [thsr_ticket/unittest/test_backup.py](../thsr_ticket/unittest/test_backup.py) | 完整備份往返、狀態保留、格式與路徑檢查、衝突、競爭及中斷保護測試。 |
 | [thsr_ticket/history_diagnostics.py](../thsr_ticket/history_diagnostics.py) | 過去任務與備份的受限唯讀掃描、環境來源、結果分類及診斷過濾。 |
 | [thsr_ticket/unittest/test_history_diagnostics.py](../thsr_ticket/unittest/test_history_diagnostics.py) | 舊紀錄、大型／損壞內容、個資排除、結果未知、取消及背景共用日誌測試。 |
 | [thsr_ticket/unittest/test_diagnostics.py](../thsr_ticket/unittest/test_diagnostics.py) | 個資排除、未知型別與數值處理、事件數量及快照獨立性測試。 |
@@ -125,6 +129,8 @@
 | [thsr_ticket/desktop/__main__.py](../thsr_ticket/desktop/__main__.py) | Qt 啟動、資源載入、安裝保護 mutex 與隔離 self-test。 |
 | [thsr_ticket/desktop/assets/app.svg](../thsr_ticket/desktop/assets/app.svg) | 應用程式向量圖示；Qt 與 icon 建置都使用。 |
 | [thsr_ticket/desktop/controller.py](../thsr_ticket/desktop/controller.py) | QML 的 Property/Signal/Slot、任務管理、資料操作及 queue 消費端。 |
+| [thsr_ticket/desktop/tools.py](../thsr_ticket/desktop/tools.py) | 桌面診斷、通知偏好／測試、環境與背景更新檢查；唯讀取得任務上下文。 |
+| [thsr_ticket/desktop/backup.py](../thsr_ticket/desktop/backup.py) | 完整備份背景工作、檔案選擇、預覽、取消及還原結果狀態。 |
 | [thsr_ticket/desktop/preferences.py](../thsr_ticket/desktop/preferences.py) | 保存最近設定路徑與桌面通知開關；各偏好更新時保留其他已知欄位。 |
 | [thsr_ticket/desktop/history.py](../thsr_ticket/desktop/history.py) | 歷史診斷背景工作、取消、過期結果丟棄、選取與過濾快照。 |
 | [thsr_ticket/desktop/notifications.py](../thsr_ticket/desktop/notifications.py) | 固定通知分類、可用性與開關判斷、系統匣介接及點擊回到頁面。 |
@@ -133,7 +139,21 @@
 | [thsr_ticket/desktop/qml/AppButton.qml](../thsr_ticket/desktop/qml/AppButton.qml) | 共用按鈕外觀與互動。 |
 | [thsr_ticket/desktop/qml/Card.qml](../thsr_ticket/desktop/qml/Card.qml) | 共用卡片容器。 |
 | [thsr_ticket/desktop/qml/Field.qml](../thsr_ticket/desktop/qml/Field.qml) | 共用欄位、眼睛遮蔽、日期時間選擇及錯誤提示。 |
-| [thsr_ticket/desktop/qml/Main.qml](../thsr_ticket/desktop/qml/Main.qml) | 主視窗、頁面、導覽、紀錄與確認對話框。 |
+| [thsr_ticket/desktop/qml/Main.qml](../thsr_ticket/desktop/qml/Main.qml) | 主視窗框架、導覽、共用操作列與頁面／對話框訊號連接。 |
+| [thsr_ticket/desktop/qml/OverviewPage.qml](../thsr_ticket/desktop/qml/OverviewPage.qml) | 旅程總覽、狀態及訂位入口。 |
+| [thsr_ticket/desktop/qml/JourneyPage.qml](../thsr_ticket/desktop/qml/JourneyPage.qml) | 行程表單、進階設定與錯誤欄位展開／捲動／聚焦。 |
+| [thsr_ticket/desktop/qml/ProgressPage.qml](../thsr_ticket/desktop/qml/ProgressPage.qml) | 執行進度、停止任務及詳細紀錄顯示。 |
+| [thsr_ticket/desktop/qml/BookingsPage.qml](../thsr_ticket/desktop/qml/BookingsPage.qml) | 訂位搜尋、篩選、分頁與逐筆操作請求。 |
+| [thsr_ticket/desktop/qml/SettingsPage.qml](../thsr_ticket/desktop/qml/SettingsPage.qml) | 一般偏好、資料管理、進階與關於三個分頁及測試通知入口。 |
+| [thsr_ticket/desktop/qml/BookingActions.qml](../thsr_ticket/desktop/qml/BookingActions.qml) | 訂位選取、官網取消引導、本機封存及人工核對對話框。 |
+| [thsr_ticket/desktop/qml/StorageDialog.qml](../thsr_ticket/desktop/qml/StorageDialog.qml) | 紀錄整理、備份還原、中斷復原及各項操作確認。 |
+| [thsr_ticket/desktop/qml/BackupDialog.qml](../thsr_ticket/desktop/qml/BackupDialog.qml) | 完整備份、還原檔案與目的位置預覽、確認及載入入口。 |
+| [thsr_ticket/desktop/qml/DiagnosticDialog.qml](../thsr_ticket/desktop/qml/DiagnosticDialog.qml) | 診斷快照預覽及匯出確認。 |
+| [thsr_ticket/desktop/qml/UnsavedDialog.qml](../thsr_ticket/desktop/qml/UnsavedDialog.qml) | 載入或關閉前的未儲存變更選擇。 |
+| [thsr_ticket/desktop/qml/Caption.qml](../thsr_ticket/desktop/qml/Caption.qml) | 共用輔助文字、顏色及換行樣式。 |
+| [thsr_ticket/desktop/qml/Line.qml](../thsr_ticket/desktop/qml/Line.qml) | 共用分隔線。 |
+| [thsr_ticket/desktop/qml/SegmentTab.qml](../thsr_ticket/desktop/qml/SegmentTab.qml) | 共用分頁選取、滑過及鍵盤焦點樣式。 |
+| [thsr_ticket/desktop/qml/PreferenceSwitch.qml](../thsr_ticket/desktop/qml/PreferenceSwitch.qml) | 共用偏好開關、停用及鍵盤焦點樣式。 |
 | [thsr_ticket/desktop/qml/HistoryDialog.qml](../thsr_ticket/desktop/qml/HistoryDialog.qml) | 歷史任務列表、階段與指引、重新讀取／取消及診斷預覽入口。 |
 | [thsr_ticket/desktop/qml/NavIcon.qml](../thsr_ticket/desktop/qml/NavIcon.qml) | 側欄圖示元件。 |
 | [thsr_ticket/desktop/updates.py](../thsr_ticket/desktop/updates.py) | 手動檢查固定 GitHub release 來源，不自動安裝更新。 |
@@ -159,7 +179,7 @@
 | [thsr_ticket/storage_errors.py](../thsr_ticket/storage_errors.py) | 紀錄操作錯誤分類、固定訊息及處理指引。 |
 | [thsr_ticket/scan_report.py](../thsr_ticket/scan_report.py) | 掃描統計、固定略過原因與取消協定。 |
 | [thsr_ticket/desktop/storage_model.py](../thsr_ticket/desktop/storage_model.py) | Qt 清單資料角色、逐列勾選更新與選取容量統計。 |
-| [thsr_ticket/desktop/record_loader.py](../thsr_ticket/desktop/record_loader.py) | 訂位背景讀取、合併刷新與過期快照丟棄。 |
+| [thsr_ticket/desktop/record_loader.py](../thsr_ticket/desktop/record_loader.py) | 訂位背景讀取與搜尋索引準備、合併刷新、取消及過期快照丟棄。 |
 | [thsr_ticket/unittest/test_record_scanning.py](../thsr_ticket/unittest/test_record_scanning.py) | 掃描部分失敗、所選紀錄驗證與結果保留測試。 |
 | [scripts/benchmark_records.py](../scripts/benchmark_records.py) | 使用暫存假資料量測掃描、整理、背景載入與 Qt 模型更新。 |
 | [thsr_ticket/unittest/test_storage_recovery.py](../thsr_ticket/unittest/test_storage_recovery.py) | 程序中斷、可重入復原、內容衝突與清單失敗測試。 |
@@ -168,7 +188,7 @@
 | [thsr_ticket/remote/__init__.py](../thsr_ticket/remote/__init__.py) | 保留套件標記／初始化；Python 匯入與 setuptools 套件發現需要整體判斷，不因內容少就刪除。 |
 | [thsr_ticket/remote/browser_request.py](../thsr_ticket/remote/browser_request.py) | Playwright/Chrome 傳輸，動態填表及頁面快照。 |
 | [thsr_ticket/remote/http_request.py](../thsr_ticket/remote/http_request.py) | requests 傳輸、表單保存及同站 URL 驗證；也供瀏覽器繼承。 |
-| [thsr_ticket/remote/native_browser.py](../thsr_ticket/remote/native_browser.py) | 尋找 Chrome/Edge、獨立 profile 與程序清理。 |
+| [thsr_ticket/remote/native_browser.py](../thsr_ticket/remote/native_browser.py) | 尋找 Chrome/Edge、獨立 profile、等待程序及有限清理重試；每次刪除前核對精確所有權與路徑。 |
 | [thsr_ticket/run_records.py](../thsr_ticket/run_records.py) | 原子 JSON、事件 JSONL、成功結果與事件通知。 |
 | [thsr_ticket/unittest/conftest.py](../thsr_ticket/unittest/conftest.py) | pytest 共用選項；控制 --live／--browser-tests，並以 --require-desktop 阻擋桌面套件缺測或跳過。 |
 | [thsr_ticket/unittest/test_desktop_gate.py](../thsr_ticket/unittest/test_desktop_gate.py) | 桌面必測機制的成功、缺測、跳過與錯誤狀態回歸。 |
@@ -189,7 +209,7 @@
 | [thsr_ticket/unittest/test_desktop_release.py](../thsr_ticket/unittest/test_desktop_release.py) | DPAPI 與手動版本檢查。 |
 | [thsr_ticket/unittest/test_gui.py](../thsr_ticket/unittest/test_gui.py) | 舊 Tk 與共用 GUI 工作流程相容性。 |
 | [thsr_ticket/unittest/test_http_request.py](../thsr_ticket/unittest/test_http_request.py) | HTTP session、動態欄位、網址及錯誤處理。 |
-| [thsr_ticket/unittest/test_native_browser.py](../thsr_ticket/unittest/test_native_browser.py) | 瀏覽器定位、程序及臨時 profile 清理。 |
+| [thsr_ticket/unittest/test_native_browser.py](../thsr_ticket/unittest/test_native_browser.py) | 專用瀏覽器 CDP 退出、資源關閉、暫存鎖定重試上限、精確所有權與每次重查路徑。 |
 | [thsr_ticket/unittest/test_ocr_benchmark.py](../thsr_ticket/unittest/test_ocr_benchmark.py) | 標註輸入驗證與評估指標。 |
 | [thsr_ticket/unittest/test_run_records.py](../thsr_ticket/unittest/test_run_records.py) | 事件、結果、保存失敗及敏感資料輸出邊界。 |
 | [thsr_ticket/version.py](../thsr_ticket/version.py) | Python 套件與桌面版本來源；Windows 資源另有對應版本需同步。 |
@@ -212,4 +232,50 @@
 | [thsr_ticket/desktop/qml/TaskPanel.qml](../thsr_ticket/desktop/qml/TaskPanel.qml) | 首頁與進度頁共用狀態卡、階段與復原入口。 |
 | [thsr_ticket/unittest/test_task_status.py](../thsr_ticket/unittest/test_task_status.py) | 狀態優先序、損壞資料、摘要欄位限制與復原路由測試。 |
 
-本次發行管理更新後，本表共 154 個檔案；每個程式碼檔案均有獨立用途列，包含相容入口與測試。原 `installer/version_info.txt` 已由 `build/release/version_info.txt` 產物取代，不再維護第二份版本來源。設定旁的 `*.task.json` 與 `*.runs.operations/` 均已加入 Git 忽略清單；不取代原有防重送紀錄。
+原 `installer/version_info.txt` 已由 `build/release/version_info.txt` 產物取代，不再維護第二份版本來源。設定旁的 `*.task.json` 與 `*.runs.operations/` 均已加入 Git 忽略清單；不取代原有防重送紀錄。
+
+### 六項優化新增檔案
+
+| 檔案 | 功能與保留理由 |
+| --- | --- |
+| [docs/booking-management.md](booking-management.md) | 實驗性官網核對／取消操作、命令佇列、持久化、來源契約與實站驗收邊界。 |
+| [docs/optimization-audit.md](optimization-audit.md) | 六項需求逐項交付、入口、重試規則、永久清理與未完成驗收確認。 |
+| [thsr_ticket/official_booking.py](../thsr_ticket/official_booking.py) | 官網結構化狀態與單程行程核對，查詢／取消證據、指紋及封存。 |
+| [thsr_ticket/remote/booking_management.py](../thsr_ticket/remote/booking_management.py) | 已觀察的查詢表單、圖片與換圖，以及精確管理按鈕、來源檢查與不重試取消。 |
+| [thsr_ticket/desktop/management.py](../thsr_ticket/desktop/management.py) | 擁有瀏覽器的單一背景執行緒、命令／結果佇列、確認期限及結束等待。 |
+| [thsr_ticket/desktop/jobs.py](../thsr_ticket/desktop/jobs.py) | 清理與 OCR 共用背景工作、取消、錯誤回饋及主執行緒取回結果。 |
+| [thsr_ticket/retention.py](../thsr_ticket/retention.py) | 過期純查票日誌預覽、狀態與雜湊保護、逐檔永久刪除及稽核。 |
+| [thsr_ticket/desktop/retention.py](../thsr_ticket/desktop/retention.py) | 保留天數、固定預覽、明確確認、設定切換保護及清理結果摘要。 |
+| [thsr_ticket/desktop/ocr_lab.py](../thsr_ticket/desktop/ocr_lab.py) | 圖片選取、人工標註保存、兩模型比較、取消及去除檔名的統計匯出。 |
+| [thsr_ticket/desktop/qml/ManagementDialog.qml](../thsr_ticket/desktop/qml/ManagementDialog.qml) | 查詢驗證碼、官網結果、取消核對／勾選確認與停止入口。 |
+| [thsr_ticket/desktop/qml/RetentionDialog.qml](../thsr_ticket/desktop/qml/RetentionDialog.qml) | 保留期限、容量與清單預覽、永久刪除確認及忙碌回饋。 |
+| [thsr_ticket/desktop/qml/OcrLabDialog.qml](../thsr_ticket/desktop/qml/OcrLabDialog.qml) | 圖片與人工標籤、評估門檻、模型指標、匯出及手動選用模型。 |
+| [thsr_ticket/unittest/test_official_booking.py](../thsr_ticket/unittest/test_official_booking.py) | 明確狀態、方向／車次／日期核對、取消證據、待確認同步與保存失敗。 |
+| [thsr_ticket/unittest/test_retention.py](../thsr_ticket/unittest/test_retention.py) | 保留範圍、資料變更、狀態阻擋、稽核失敗與部分清理測試。 |
+| [thsr_ticket/unittest/test_feature_desktop.py](../thsr_ticket/unittest/test_feature_desktop.py) | 背景管理工作階段、實際 QML 同意門檻、清理、OCR、倒數與大量資料分頁測試。 |
+| [scripts/benchmark_desktop.py](../scripts/benchmark_desktop.py) | 真 QML 假資料卡片數／更新／心跳量測，以及大型日誌及超大單行驗證。 |
+| [scripts/verify_management_transport.py](../scripts/verify_management_transport.py) | 真 Chrome 全請求攔截，驗證合成查詢、原生確認、取消、付款／外站阻擋與斷線不重送。 |
+
+### 固定範圍收尾新增檔案
+
+| 檔案 | 功能與保留理由 |
+| --- | --- |
+| [thsr_ticket/record_search.py](../thsr_ticket/record_search.py) | 每份顯示快照的正規化搜尋文件、目前紀錄數、最多八組篩選快取與每頁 25 筆結果；不讀寫訂位。 |
+| [thsr_ticket/unittest/test_record_search.py](../thsr_ticket/unittest/test_record_search.py) | 大小寫／前後空白、複合篩選、頁碼界線、快取重用與淘汰、新快照及建立中取消。 |
+| [scripts/verify_desktop_session.py](../scripts/verify_desktop_session.py) | Windows 原生 Qt 隔離視窗：縮放、最小化／最大化、鍵盤、焦點、可存取名稱及選用本機測試通知；不代替人工通知點擊與螢幕閱讀器驗收。 |
+
+`test_feature_desktop.py` 同時補驗背景索引直接交接、替換快照使快取失效，以及真 QML 輸入延遲／Enter／清空。`test_single_instance.py` 補真 QQuickWindow 的狀態測試。`benchmark_desktop.py` 補索引、非空白搜尋、快取換頁及連續輸入量測，完整證據見 [驗證紀錄](verification.md)。
+
+### 集中驗收工具
+
+| 檔案 | 功能與保留理由 |
+| --- | --- |
+| [docs/acceptance.md](acceptance.md) | 一次執行方式、七項本機操作、兩項待資料驗收、通過條件及一次回報格式。 |
+| [scripts/verify_acceptance.py](../scripts/verify_acceptance.py) | 集中執行測試、lint、瀏覽器合成流程、自我檢查、量測、預覽及選用原生驗證；核對報告、非預期跳過、程式指紋與文件索引，生成新的一份 JSON／Markdown 報告。 |
+| [scripts/review_desktop.py](../scripts/review_desktop.py) | 建立獨立假資料與偏好資料夾、可操作的 Qt 驗收視窗、讀寫位置限制及真實訂位動作阻擋。 |
+| [thsr_ticket/desktop/qml/DatePicker.qml](../thsr_ticket/desktop/qml/DatePicker.qml) | 可上下拖曳、滾動與鍵盤操作的年月日選擇器；閏年／月底調整、視圖對齊及獨立取消／套用。 |
+| [thsr_ticket/unittest/test_acceptance_tools.py](../thsr_ticket/unittest/test_acceptance_tools.py) | 假資料、既有檔案不覆寫、無效訂票設定、JUnit 跳過／失敗、必要產物、來源指紋與人工狀態不誤報通過。 |
+
+`test_feature_desktop.py` 補驗隔離視窗的 Qt 指令不啟動 worker、不開官網，以及不能載入或改寫外部設定。`conftest.py`／`test_desktop_gate.py` 將這個新增功能測試模組納入必測；Windows CI 的 Flake8 改為涵蓋整個 scripts 目錄。
+
+日期回歸同樣位於 `test_feature_desktop.py`，涵蓋年月日三欄滾動方向、拖曳、閏年與月底、重開選取、取消及時間保留。`verify_desktop_session.py` 補實際 Windows 的相同操作及日期畫面擷取；`preview_desktop.py` 補搭車／啟動日期的 100／150% 預覽。

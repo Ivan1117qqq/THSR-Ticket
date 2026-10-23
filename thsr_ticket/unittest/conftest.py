@@ -10,7 +10,8 @@ def pytest_addoption(parser):
 
 class DesktopGate:
     required = {'test_desktop.py', 'test_desktop_acceptance.py',
-                'test_desktop_release.py', 'test_task_status.py', 'test_single_instance.py'}
+                'test_desktop_release.py', 'test_task_status.py', 'test_single_instance.py',
+                'test_feature_desktop.py'}
 
     def __init__(self):
         self.passed = set()

@@ -22,7 +22,7 @@ jobs:
           name: release-test-report
           path: build/desktop-tests.xml
           if-no-files-found: error
-      - run: python -m flake8 -j1 --config .config/flake thsr_ticket scripts/preview_desktop.py scripts/benchmark_records.py scripts/release_metadata.py scripts/installer_fixture.py
+      - run: python -m flake8 -j1 --config .config/flake thsr_ticket scripts
       - run: python -m PyInstaller TravelDesk.spec --noconfirm
       - name: Build unsigned installer
         shell: pwsh

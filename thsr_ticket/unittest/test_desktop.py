@@ -7,11 +7,13 @@ import pytest
 
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 pytest.importorskip('PySide6')
-from PySide6.QtCore import QUrl, QObject, QMetaObject, Qt  # noqa: E402
+from PySide6.QtCore import QUrl, QObject, QMetaObject, Qt, QPointF  # noqa: E402
 from PySide6.QtGui import QFontDatabase  # noqa: E402
 from PySide6.QtQml import QQmlApplicationEngine  # noqa: E402
+from PySide6.QtQuick import QQuickItem  # noqa: E402
 from PySide6.QtQuickControls2 import QQuickStyle  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
+from shiboken6 import delete as delete_qml  # noqa: E402
 from thsr_ticket.desktop.controller import DesktopController, form_values  # noqa: E402
 from thsr_ticket.unittest.test_gui import values  # noqa: E402
 from thsr_ticket.application import form_config  # noqa: E402
@@ -39,10 +41,207 @@ def controller(qt, tmp_path):
     yield controller
     controller.timer.stop()
     controller.storage._timer.stop()
+    controller.management.stop()
+    controller.retention.cancel()
+    controller.ocrLab.cancel()
+    for service in (controller.management, controller.retention, controller.ocrLab):
+        if service._thread is not None:
+            service._thread.join(timeout=5)
+            assert not service._thread.is_alive()
+            service.poll()
     controller._record_loader.cancel()
     finish_records(controller)
     controller._history.cancel()
     finish_history(controller)
+    controller.backup.cancel()
+    finish_backup(controller)
+
+
+def finish_backup(controller):
+    manager = controller.backup
+    if manager._thread is not None:
+        manager._thread.join(timeout=5)
+        assert not manager._thread.is_alive()
+        manager.poll()
+    assert not manager.busy
+
+
+def test_complete_backup_restore_manager_keeps_original_and_blocks_rebooking(controller, tmp_path, monkeypatch):
+    controller.save()
+    original_config = controller.path
+    original = original_config.read_bytes()
+    manager = controller.backup
+    manager.previewSource()
+    assert controller.running and not controller.task['can_book']
+    controller.start(True)
+    controller.worker.assert_not_called()
+    before = dict(controller.form)
+    controller.setField('dest_station', '台中')
+    assert controller.form == before
+    finish_backup(controller)
+    assert manager.canExport
+    archive = tmp_path / 'full.thsr-backup.zip'
+    monkeypatch.setattr('thsr_ticket.desktop.backup.QFileDialog.getSaveFileName', lambda *args: (str(archive), ''))
+    manager.chooseExport()
+    finish_backup(controller)
+    assert archive.exists()
+    monkeypatch.setattr('thsr_ticket.desktop.backup.QFileDialog.getOpenFileName', lambda *args: (str(archive), ''))
+    manager.chooseArchive()
+    finish_backup(controller)
+    assert manager.canChooseDestination and not manager.canRestore
+    monkeypatch.setattr('thsr_ticket.desktop.backup.QFileDialog.getExistingDirectory', lambda *args: str(tmp_path))
+    manager.chooseDestination()
+    finish_backup(controller)
+    assert manager.canRestore
+    manager.applyRestore()
+    finish_backup(controller)
+    assert original_config.read_bytes() == original
+    assert controller.path == original_config
+    assert manager.restoredPath and not manager.canRestore and not manager.canChooseDestination
+    assert controller.loadRestored()
+    assert controller.path != original_config
+    assert not controller.task['can_book']
+    controller.start(False)
+    controller.worker.assert_not_called()
+
+
+def test_backup_requires_saved_config_and_rechecks_restore_conflicts(controller, tmp_path, monkeypatch):
+    from thsr_ticket.unittest.test_backup import bundle
+    manager = controller.backup
+    manager.previewSource()
+    assert not manager.busy and not manager.canExport
+    assert not controller.path.exists()
+    _, _, archive = bundle(tmp_path / 'backup-fixture')
+    monkeypatch.setattr('thsr_ticket.desktop.backup.QFileDialog.getOpenFileName', lambda *args: (str(archive), ''))
+    monkeypatch.setattr('thsr_ticket.desktop.backup.QFileDialog.getExistingDirectory', lambda *args: str(tmp_path))
+    manager.chooseArchive()
+    finish_backup(controller)
+    manager.chooseDestination()
+    finish_backup(controller)
+    target = Path(manager.targetPath)
+    target.mkdir()
+    (target / 'keep.txt').write_text('keep')
+    manager.applyRestore()
+    finish_backup(controller)
+    assert manager.error['code'] == 'backup_destination_exists'
+    assert (target / 'keep.txt').read_text() == 'keep'
+    assert not manager.restoredPath and not manager.canRestore
+
+
+def test_close_cancels_backup_preview_and_waits(controller, monkeypatch):
+    import threading
+    from thsr_ticket.scan_report import ScanCancelled
+    entered = threading.Event()
+
+    def preview(config, cancel):
+        entered.set()
+        assert cancel.wait(timeout=5)
+        raise ScanCancelled()
+
+    monkeypatch.setattr('thsr_ticket.desktop.backup.preview_source', preview)
+    controller._saved_form = dict(controller._form)
+    controller.backup.previewSource()
+    assert entered.wait(timeout=5)
+    closed = []
+    controller.closeReady.connect(lambda: closed.append(True))
+    controller.requestClose()
+    assert not closed
+    finish_backup(controller)
+    controller.poll()
+    assert closed == [True]
+    assert not controller.path.exists()
+
+
+def test_backup_dialog_runs_only_reviewed_operations(qt, controller, tmp_path, monkeypatch):
+    controller.save()
+    engine = QQmlApplicationEngine()
+    warnings = []
+    engine.warnings.connect(lambda errors: warnings.extend(str(error) for error in errors))
+    engine.setInitialProperties({'backend': controller})
+    engine.load(QUrl.fromLocalFile(str(Path(__file__).parents[1] / 'desktop/qml/Main.qml')))
+    assert engine.rootObjects(), warnings
+    window = engine.rootObjects()[0]
+    window.resize(1080, 720)
+    manager = controller.backup
+    manager.previewSource()
+    finish_backup(controller)
+    QMetaObject.invokeMethod(window.findChild(QObject, 'backupDialog'), 'open')
+    qt.processEvents()
+    export_button = window.findChild(QObject, 'exportBackupButton')
+    assert export_button.property('enabled')
+    archive = tmp_path / 'ui.thsr-backup.zip'
+    monkeypatch.setattr('thsr_ticket.desktop.backup.QFileDialog.getSaveFileName', lambda *args: (str(archive), ''))
+    QMetaObject.invokeMethod(export_button, 'clicked', Qt.DirectConnection)
+    finish_backup(controller)
+    assert archive.exists()
+    window.findChild(QObject, 'backupTabs').setProperty('currentIndex', 1)
+    monkeypatch.setattr('thsr_ticket.desktop.backup.QFileDialog.getOpenFileName', lambda *args: (str(archive), ''))
+    monkeypatch.setattr('thsr_ticket.desktop.backup.QFileDialog.getExistingDirectory', lambda *args: str(tmp_path))
+    manager.chooseArchive()
+    finish_backup(controller)
+    manager.chooseDestination()
+    finish_backup(controller)
+    qt.processEvents()
+    restore_button = window.findChild(QObject, 'restoreBackupButton')
+    assert restore_button.property('enabled')
+    QMetaObject.invokeMethod(restore_button, 'clicked', Qt.DirectConnection)
+    finish_backup(controller)
+    qt.processEvents()
+    assert manager.restoredPath
+    load_button = window.findChild(QQuickItem, 'loadRestoredButton')
+    assert load_button.property('enabled')
+    assert not restore_button.property('visible')
+    for _ in range(3):
+        qt.processEvents()
+    # Next actions must remain visible at the minimum window size without scrolling.
+    for name in ('loadRestoredButton', 'openRestoredButton'):
+        button = window.findChild(QQuickItem, name)
+        point = button.mapToScene(QPointF(0, 0))
+        assert button.isVisible() and point.x() >= 0 and point.y() >= 0
+        assert point.x() + button.width() <= window.width()
+        assert point.y() + button.height() <= window.height()
+    original = controller.path
+    controller._running = True
+    controller.changed.emit()
+    qt.processEvents()
+    assert not load_button.property('enabled')
+    assert not controller.loadRestored() and controller.path == original
+    controller._running = False
+    assert not warnings
+    window.setProperty('allowClose', True)
+    window.close()
+    delete_qml(engine)
+    qt.processEvents()
+
+
+def test_close_waits_for_backup_writes_to_finish(controller, tmp_path, monkeypatch):
+    import threading
+    controller.save()
+    manager = controller.backup
+    manager.previewSource()
+    finish_backup(controller)
+    entered, release = threading.Event(), threading.Event()
+
+    def export(plan, target):
+        entered.set()
+        assert release.wait(timeout=5)
+        return Path(target)
+
+    monkeypatch.setattr('thsr_ticket.desktop.backup.export_backup', export)
+    monkeypatch.setattr('thsr_ticket.desktop.backup.QFileDialog.getSaveFileName',
+                        lambda *args: (str(tmp_path / 'fake.thsr-backup.zip'), ''))
+    manager.chooseExport()
+    assert entered.wait(timeout=5)
+    closed = []
+    controller.closeReady.connect(lambda: closed.append(True))
+    try:
+        controller.requestClose()
+        assert not closed and manager.busy and not manager._cancel.is_set()
+    finally:
+        release.set()
+        finish_backup(controller)
+    controller.poll()
+    assert closed == [True]
 
 
 def finish_history(controller):
@@ -57,6 +256,132 @@ def finish_history(controller):
     assert not manager.busy
 
 
+def test_notification_test_has_no_booking_effect_and_preserves_real_notification(controller):
+    tools = controller.tools
+    delivered = []
+    tools.desktopNotification.connect(lambda *args: delivered.append(args))
+    tools.testNotification()
+    assert not delivered
+    tools.setNotifications(True)
+    tools.testNotification()
+    assert not delivered
+    tools.set_notification_support(True)
+    original = controller.tool_context()
+    tools.testNotification()
+    assert len(delivered) == 1 and delivered[0][2] == 'settings'
+    assert controller.tool_context() == original
+    controller.worker.assert_not_called()
+    assert not controller.path.with_suffix('.state.json').exists()
+    assert not tools._notification_emitted
+    tools.notify_task_finished()
+    assert len(delivered) == 2
+    controller.openNotification('settings')
+    assert controller.page == 4
+
+
+def test_tools_update_check_is_background_and_does_not_start_during_task(controller, monkeypatch):
+    import threading
+    entered, release = threading.Event(), threading.Event()
+    calls = []
+
+    def check(version):
+        calls.append(threading.get_ident())
+        entered.set()
+        assert release.wait(timeout=5)
+        raise RuntimeError('PRIVATE-ERROR')
+
+    monkeypatch.setattr('thsr_ticket.desktop.tools.check_release', check)
+    tools = controller.tools
+    controller._running = True
+    tools.checkUpdates()
+    assert not entered.is_set()
+    controller._running = False
+    tools.checkUpdates()
+    assert entered.wait(timeout=5)
+    try:
+        tools.checkUpdates()
+        assert tools.updateChecking
+        assert calls != [threading.get_ident()] and len(calls) == 1
+    finally:
+        release.set()
+    # The worker only publishes a result; the Qt thread applies it in poll().
+    result = tools._messages.get(timeout=5)
+    tools._messages.put(result)
+    tools.poll()
+    assert not tools.updateChecking and not tools.updateAvailable
+    assert 'PRIVATE-ERROR' not in tools.updateMessage
+
+
+def test_settings_keyboard_tabs_and_invalid_advanced_field_focus(qt, controller):
+    from PySide6.QtTest import QTest
+    engine = QQmlApplicationEngine()
+    warnings = []
+    engine.warnings.connect(lambda errors: warnings.extend(str(error) for error in errors))
+    engine.setInitialProperties({'backend': controller})
+    engine.load(QUrl.fromLocalFile(str(Path(__file__).parents[1] / 'desktop/qml/Main.qml')))
+    assert engine.rootObjects(), warnings
+    window = engine.rootObjects()[0]
+    window.resize(1080, 720)
+    controller.navigate(4)
+    qt.processEvents()
+
+    settings = window.findChild(QObject, 'settingsPage')
+    first = window.findChild(QObject, 'generalSettingsTab')
+    first.forceActiveFocus()
+    QTest.keyClick(window, Qt.Key_Right)
+    for _ in range(5):
+        qt.processEvents()
+    assert settings.property('section') == 1
+    QTest.keyClick(window, Qt.Key_Right)
+    for _ in range(5):
+        qt.processEvents()
+    assert settings.property('section') == 2
+    controller.setField('max_attempts', '0')
+    controller.save()
+    for _ in range(15):
+        qt.processEvents()
+    field = window.findChild(QObject, 'max_attempts')
+    assert controller.page == 1
+    assert field.property('activeFocus') and field.property('visible')
+    assert not controller.path.exists()
+    controller.worker.assert_not_called()
+    assert not warnings
+    window.setProperty('allowClose', True)
+    window.close()
+    delete_qml(engine)
+    qt.processEvents()
+
+
+def test_tools_update_worker_start_failure_does_not_leave_busy(controller, monkeypatch):
+    thread = Mock()
+    thread.start.side_effect = RuntimeError('PRIVATE-ERROR')
+    monkeypatch.setattr('thsr_ticket.desktop.tools.threading.Thread', Mock(return_value=thread))
+    controller.tools.checkUpdates()
+    assert not controller.tools.updateChecking
+    assert 'PRIVATE-ERROR' not in controller.tools.updateMessage
+
+
+def test_unsaved_dialog_keeps_load_action_after_component_split(qt, controller, monkeypatch):
+    engine = QQmlApplicationEngine()
+    engine.setInitialProperties({'backend': controller})
+    engine.load(QUrl.fromLocalFile(str(Path(__file__).parents[1] / 'desktop/qml/Main.qml')))
+    assert engine.rootObjects()
+    window = engine.rootObjects()[0]
+    choose = Mock()
+    monkeypatch.setattr(controller, 'choose_load', choose)
+    assert controller.dirty
+    controller.load()
+    qt.processEvents()
+    button = window.findChild(QObject, 'discardUnsavedButton')
+    assert button is not None
+    QMetaObject.invokeMethod(button, 'clicked', Qt.DirectConnection)
+    choose.assert_called_once()
+    window.setProperty('allowClose', True)
+    window.close()
+    delete_qml(engine)
+    qt.processEvents()
+
+
 def test_history_snapshot_is_frozen_and_exportable_after_restart(controller, tmp_path, monkeypatch):
     from thsr_ticket.unittest.test_history_diagnostics import write_events
     from thsr_ticket.booking_records import record_paths
@@ -65,23 +390,23 @@ def test_history_snapshot_is_frozen_and_exportable_after_restart(controller, tmp
         {'event': 'stage', 'phase': 'query'},
         {'event': 'task_completed', 'outcome': 'network', 'message': 'PRIVATE'},
     ])
-    controller.prepareHistory()
+    controller.tools.prepareHistory()
     finish_history(controller)
-    manager = controller.historyDiagnostics
+    manager = controller.tools.historyDiagnostics
     assert len(manager.rows) == 1
     manager.select(manager.rows[0]['id'])
-    assert controller.prepareHistoricalDiagnostics()
-    preview = controller.diagnosticPreview
+    assert controller.tools.prepareHistoricalDiagnostics()
+    preview = controller.tools.diagnosticPreview
     assert 'PRIVATE' not in preview
     assert json.loads(preview)['outcome'] == 'network'
     path.unlink()
     target = tmp_path / 'history.diagnostics.json'
     monkeypatch.setattr('thsr_ticket.desktop.controller.QFileDialog.getSaveFileName',
                         lambda *args: (str(target), ''))
-    controller.exportDiagnostics()
+    controller.tools.exportDiagnostics()
     assert target.read_text(encoding='utf-8') == preview + '\n'
     controller.path = tmp_path / 'different.json'
-    assert not controller.prepareHistoricalDiagnostics()
+    assert not controller.tools.prepareHistoricalDiagnostics()
 
 
 def test_history_stale_config_is_discarded_and_close_waits(controller, monkeypatch):
@@ -99,16 +424,16 @@ def test_history_stale_config_is_discarded_and_close_waits(controller, monkeypat
         return [], {}, {'accepted': 0, 'skipped': 0, 'failed': 0, 'not_loaded': 0}
 
     monkeypatch.setattr('thsr_ticket.desktop.history.scan_history', scan)
-    controller.prepareHistory()
+    controller.tools.prepareHistory()
     assert entered.wait(timeout=5)
     controller.path = controller.path.with_name('other.json')
-    controller.prepareHistory()
+    controller.tools.prepareHistory()
     finish_history(controller)
     assert calls[-1] == controller.path and len(calls) == 2
-    assert controller.historyDiagnostics.rows == []
+    assert controller.tools.historyDiagnostics.rows == []
     entered.clear()
     calls.clear()
-    controller.prepareHistory()
+    controller.tools.prepareHistory()
     assert entered.wait(timeout=5)
     controller._saved_form = dict(controller._form)
     closed = []
@@ -123,27 +448,27 @@ def test_history_stale_config_is_discarded_and_close_waits(controller, monkeypat
 
 
 def test_notification_preference_survives_config_remember_and_failure(controller, monkeypatch):
-    assert not controller.notificationsEnabled
-    controller.setNotifications(True)
+    assert not controller.tools.notificationsEnabled
+    controller.tools.setNotifications(True)
     controller.preferences.remember(controller.path)
     assert controller.preferences.read()['desktop_notifications'] is True
     previous = controller.preferences.read()['last_config']
-    controller.setNotifications(False)
+    controller.tools.setNotifications(False)
     assert controller.preferences.read()['last_config'] == previous
     monkeypatch.setattr(controller.preferences, 'notifications', Mock(side_effect=PermissionError()))
-    controller.setNotifications(True)
-    assert not controller.notificationsEnabled
+    controller.tools.setNotifications(True)
+    assert not controller.tools.notificationsEnabled
     assert controller.error
 
 
 def test_task_notifications_emit_once_after_worker_join_and_respect_opt_out(controller):
     import threading
     delivered = []
-    controller.desktopNotification.connect(lambda *args: delivered.append(args))
+    controller.tools.desktopNotification.connect(lambda *args: delivered.append(args))
     controller.poll()  # Merely opening the App does not replay a past notification.
     assert not delivered
     controller._query_only = True
-    controller._notifications_enabled = True
+    controller.tools._notifications_enabled = True
     controller._running = True
     release = threading.Event()
     controller._thread = threading.Thread(target=lambda: release.wait(timeout=5))
@@ -159,9 +484,9 @@ def test_task_notifications_emit_once_after_worker_join_and_respect_opt_out(cont
     controller.poll()
     controller.poll()
     assert len(delivered) == 1 and delivered[0][2] == 'progress'
-    controller._notification_emitted = False
-    controller._notifications_enabled = False
-    controller.notify_task_finished()
+    controller.tools._notification_emitted = False
+    controller.tools._notifications_enabled = False
+    controller.tools.notify_task_finished()
     assert len(delivered) == 1
     controller.openNotification('records')
     assert controller.page == 3
@@ -224,17 +549,17 @@ def test_diagnostic_preview_exports_exact_snapshot_without_overwrite(controller,
     controller._messages.put(('event', {'event': 'run_stopped', 'reason': 'network_timeout',
                                         'code': 'SECRET-BOOKING'}))
     controller.poll()
-    controller.prepareDiagnostics()
-    preview = controller.diagnosticPreview
+    controller.tools.prepareDiagnostics()
+    preview = controller.tools.diagnosticPreview
     assert 'SECRET-BOOKING' not in preview
     target = tmp_path / 'support.diagnostics.json'
     monkeypatch.setattr('thsr_ticket.desktop.controller.QFileDialog.getSaveFileName',
                         lambda *args: (str(target), ''))
-    controller._diagnostic_events.append({'event': 'run_finished'})
-    controller.exportDiagnostics()
+    controller.tools._diagnostic_events.append({'event': 'run_finished'})
+    controller.tools.exportDiagnostics()
     assert target.read_text(encoding='utf-8') == preview + '\n'
     target.write_text('existing')
-    controller.exportDiagnostics()
+    controller.tools.exportDiagnostics()
     assert target.read_text() == 'existing'
 
 
@@ -490,24 +815,25 @@ def test_booking_cards_are_paginated(qt, controller):
     controller.changed.emit()
     for _ in range(10):
         qt.processEvents()
-    assert window.property('recordPageCount') == 5
+    assert window.findChild(QObject, 'bookingsPage').property('recordPageCount') == 5
     assert window.findChild(QObject, 'bookingCards').property('count') == 25
-    window.setProperty('recordPage', 4)
+    window.findChild(QObject, 'bookingsPage').setProperty('recordPage', 4)
     for _ in range(10):
         qt.processEvents()
     assert window.findChild(QObject, 'bookingCards').property('count') == 1
     assert not warnings
     window.setProperty('allowClose', True)
     window.close()
+    delete_qml(engine)
 
 
 def test_diagnostic_cancel_and_config_destination_are_safe(controller, tmp_path, monkeypatch):
-    controller.prepareDiagnostics()
+    controller.tools.prepareDiagnostics()
     target = tmp_path / 'booking.local.json'
     for destination in ('', str(target)):
         monkeypatch.setattr('thsr_ticket.desktop.controller.QFileDialog.getSaveFileName',
                             lambda *args: (destination, ''))
-        controller.exportDiagnostics()
+        controller.tools.exportDiagnostics()
         assert not target.exists()
 
 
@@ -797,15 +1123,15 @@ def test_qml_pages_render_without_errors(qt, controller, tmp_path):
     _, runs = record_paths(controller.path)
     write_events(runs / ('d' * 32) / 'events.jsonl', [
         {'event': 'stage', 'phase': 'query'}, {'event': 'task_completed', 'outcome': 'network'}])
-    controller.prepareHistory()
+    controller.tools.prepareHistory()
     finish_history(controller)
-    controller.historyDiagnostics.select(controller.historyDiagnostics.rows[0]['id'])
+    controller.tools.historyDiagnostics.select(controller.tools.historyDiagnostics.rows[0]['id'])
     history = root.findChild(QObject, 'historyDiagnosticsDialog')
     assert QMetaObject.invokeMethod(history, 'open')
     for _ in range(5):
         qt.processEvents()
     assert not root.grabWindow().isNull()
-    assert controller.prepareHistoricalDiagnostics()
+    assert controller.tools.prepareHistoricalDiagnostics()
     dialog = root.findChild(QObject, 'diagnosticDialog')
     QMetaObject.invokeMethod(dialog, 'open')
     qt.processEvents()
@@ -814,5 +1140,5 @@ def test_qml_pages_render_without_errors(qt, controller, tmp_path):
     assert not warnings
     root.setProperty('allowClose', True)
     root.close()
-    engine.deleteLater()
+    delete_qml(engine)
     qt.processEvents()

@@ -3,9 +3,9 @@ import io
 import json
 import queue
 import threading
-import importlib.util
 import os
-from collections import deque
+import time
+import math
 from datetime import datetime
 from pathlib import Path
 
@@ -19,16 +19,20 @@ from thsr_ticket.automation import TAIPEI
 from thsr_ticket.booking_records import (
     record_paths, archive_booking, resolve_pending, confirm_cancelled,
 )
-from thsr_ticket.config_store import read_config_data, write_config_data, is_protected, ConfigVersionError
+from thsr_ticket.config_store import (
+    read_config_data, write_config_data, is_protected, ConfigVersionError, ConfigRestoreError,
+)
 from thsr_ticket.desktop.preferences import Preferences
-from thsr_ticket.desktop.updates import check_release, RELEASES
 from thsr_ticket.version import VERSION
-from thsr_ticket.diagnostics import safe_event, snapshot
 from thsr_ticket.desktop.storage import StorageManager
 from thsr_ticket.desktop.record_loader import RecordLoader
-from thsr_ticket.desktop.history import HistoryDiagnostics
-from thsr_ticket.desktop.notifications import task_notification
+from thsr_ticket.desktop.tools import DesktopTools
+from thsr_ticket.desktop.backup import BackupManager
+from thsr_ticket.desktop.management import BookingManager
+from thsr_ticket.desktop.retention import RetentionManager
+from thsr_ticket.desktop.ocr_lab import OcrLab
 from thsr_ticket.task_status import load_task, save_task, booking_guard, task_view
+from thsr_ticket.record_search import RecordSearchIndex
 
 
 def defaults():
@@ -37,7 +41,7 @@ def defaults():
                 start_station='台北', dest_station='左營', earliest_departure='09:30', latest_departure='23:59',
                 train_ids='', adult_tickets='1', child_tickets='0', disabled_tickets='0', elder_tickets='0',
                 college_tickets='0', class_type='標準', personal_id='', phone_num='', interval_seconds='1',
-                max_attempts='60', ocr_model='standard')
+                max_attempts='60', ocr_model='standard', network_failure_limit='3', max_network_delay_seconds='30')
 
 
 def form_values(data):
@@ -72,17 +76,13 @@ class DesktopController(QObject):
     resetSecrets = Signal()
     confirmRequested = Signal(str)
     storageRecoveryDetected = Signal()
-    desktopNotification = Signal(str, str, str)
-    notificationsChanged = Signal(bool)
+    validationFailed = Signal(str)
 
     def __init__(self, data_dir, worker=run_background):
         super().__init__()
         self.data_dir = Path(data_dir)
         self.path = self.data_dir / 'booking.local.json'
         self.preferences = Preferences(self.data_dir)
-        self._notifications_enabled = self.preferences.read().get('desktop_notifications') is True
-        self._notification_available = False
-        self._notification_emitted = False
         previous = self.preferences.read().get('last_config')
         if isinstance(previous, str) and Path(previous).is_absolute():
             self.path = Path(previous)
@@ -92,6 +92,7 @@ class DesktopController(QObject):
         self._protect_private = os.name == 'nt'
         self._saved_protection = self._protect_private
         self._records = []
+        self._record_search = RecordSearchIndex(self._records)
         self._records_source = None
         self._record_loader = RecordLoader(self)
         self._record_loader.changed.connect(self.changed.emit)
@@ -109,25 +110,34 @@ class DesktopController(QObject):
         self._running = False
         self._page = 0
         self._log = ''
-        self._diagnostic_events = deque(maxlen=200)
-        self._diagnostic_preview = ''
-        self._diagnostic_scope = 'session'
-        self._history = HistoryDiagnostics(self)
-        self._history.changed.connect(self.changed.emit)
+        self._tools = DesktopTools(self.data_dir, self.preferences, self.tool_context, self)
+        self._tools.notice.connect(self.notify)
+        self._history = self._tools.historyDiagnostics
         self._history_closing = False
         self._storage = StorageManager(self)
         self._storage.changed.connect(self.changed.emit)
         self._storage.mutated.connect(self.refresh)
         self._storage.recoveryFound.connect(self.storageRecoveryDetected.emit)
         self._storage_closing = False
+        self._backup = BackupManager(self.backup_context, self)
+        self._backup.changed.connect(self.changed.emit)
+        self._backup.notice.connect(self.notify)
+        self.formChanged.connect(self._backup.invalidate_source)
+        self._backup_closing = False
+        self._management = BookingManager(self.backup_context, self)
+        self._retention = RetentionManager(self.backup_context, self)
+        self._ocr_lab = OcrLab(self.backup_context, self)
+        self._extras_closing = False
+        for service in (self._management, self._retention, self._ocr_lab):
+            service.changed.connect(self.changed.emit)
+            service.mutated.connect(self.refresh)
         self._error = False
         self._issues = {}
         self._match = {}
         self._countdown = ''
+        self._retry_until = 0
+        self._retry_reason = ''
         self._recovery = ''
-        self._update_checking = False
-        self._update_message = '手動檢查正式版本，不會自動下載或覆蓋程式。'
-        self._update_available = False
         self._closing = False
         self._thread = None
         self._received_done = False
@@ -143,122 +153,70 @@ class DesktopController(QObject):
         self.refresh()
         QTimer.singleShot(0, self.checkStorageRecovery)
 
-    @Property(str, notify=changed)
-    def diagnosticPreview(self):
-        return self._diagnostic_preview
-
-    @Property(str, notify=changed)
-    def diagnosticDescription(self):
-        return ('歷史任務讀取時的快照，最多 200 筆過濾事件；版本以該次保存內容為準，未記錄者標示 unknown。'
-                if self._diagnostic_scope == 'history' else
-                '本次開啟 App 最近 200 筆過濾事件與狀態；不含個資、訂位代碼或完整日誌。')
-
-    @Property(QObject, constant=True)
-    def historyDiagnostics(self):
-        return self._history
-
-    @Slot()
-    def prepareHistory(self):
-        self._history.begin(self.path)
-
-    @Slot(result=bool)
-    def prepareHistoricalDiagnostics(self):
-        if self._history.busy or not self._history.preview or self._history.config != self.path:
-            return False
-        self._diagnostic_preview = self._history.preview
-        self._diagnostic_scope = 'history'
-        self.changed.emit()
-        return True
-
-    @Property(bool, notify=changed)
-    def notificationsEnabled(self):
-        return self._notifications_enabled
-
-    @Property(bool, notify=changed)
-    def notificationsAvailable(self):
-        return self._notification_available
-
-    def set_notification_support(self, available):
-        self._notification_available = bool(available)
-        self.changed.emit()
-
-    @Slot(bool)
-    def setNotifications(self, enabled):
-        try:
-            self.preferences.notifications(enabled)
-        except OSError:
-            self.notify('通知設定無法保存，請確認 App 資料夾權限。', True)
-            self.changed.emit()
-            return
-        self._notifications_enabled = enabled
-        self.notificationsChanged.emit(enabled)
-        self.changed.emit()
-
     @Slot(str)
     def openNotification(self, target):
-        if target in ('records', 'progress'):
-            self.navigate(3 if target == 'records' else 2)
+        if target in ('records', 'progress', 'settings'):
+            self.navigate({'records': 3, 'progress': 2, 'settings': 4}[target])
 
-    def notify_task_finished(self):
-        if self._notification_emitted:
-            return
-        self._notification_emitted = True
-        if not self._notifications_enabled:
-            return
-        item = task_notification(self._task_snapshot.get('code', 'interrupted'),
-                                 self._query_only, self._guard, self._stage)
-        if item:
-            self.desktopNotification.emit(item['title'], item['body'], item['target'])
+    @Property(QObject, constant=True)
+    def tools(self):
+        return self._tools
+
+    def tool_context(self):
+        return {'config': self.path, 'task': self._task_snapshot.get('code', 'interrupted'),
+                'query_only': self._query_only, 'guard': self._guard, 'phase': self._stage,
+                'running': self.running}
+
+    @Property(QObject, constant=True)
+    def backup(self):
+        return self._backup
+
+    def backup_context(self):
+        return {'config': self.path, 'running': self.running, 'dirty': self.dirty}
+
+    @Slot(result=bool)
+    def loadRestored(self):
+        if self.running or self.dirty or not self._backup.restoredPath:
+            return False
+        if not self.load_path(self._backup.restoredPath):
+            self._backup.report_error('backup_config_locked')
+            return False
+        return True
 
     @Property(QObject, constant=True)
     def storage(self):
         return self._storage
 
+    @Property(QObject, constant=True)
+    def management(self):
+        return self._management
+
+    @Property(QObject, constant=True)
+    def retention(self):
+        return self._retention
+
+    @Property(QObject, constant=True)
+    def ocrLab(self):
+        return self._ocr_lab
+
     @Slot()
     def prepareStorage(self):
-        if not self._running:
+        if not self.running:
             self._storage.begin(self.path)
 
     @Slot()
     def checkStorageRecovery(self):
-        if self._running or self._storage.busy:
+        if self.running:
             return
         _, runs = record_paths(self.path)
         root = runs.parent / (runs.name + '.operations')
         if root.exists() or root.is_symlink():
             self._storage.inspect(self.path)
 
-    @Slot()
-    def prepareDiagnostics(self):
-        self._diagnostic_scope = 'session'
-        self._diagnostic_preview = json.dumps(snapshot(
-            self._diagnostic_events, self._task_snapshot.get('code'), self._guard, self._running),
-            ensure_ascii=False, indent=2)
-        self.changed.emit()
-
-    @Slot()
-    def exportDiagnostics(self):
-        if not self._diagnostic_preview:
-            return
-        target, _ = QFileDialog.getSaveFileName(
-            None, '匯出診斷資料', str(self.data_dir / 'travel-desk.diagnostics.json'), 'JSON (*.json)')
-        if not target:
-            return
-        if not target.endswith('.diagnostics.json'):
-            self.notify('請使用 .diagnostics.json 副檔名，以免與訂票設定混淆。', True)
-            return
-        try:
-            with Path(target).open('x', encoding='utf-8') as handle:
-                handle.write(self._diagnostic_preview + '\n')
-            self.notify('診斷資料已匯出；未傳送至網路。')
-        except FileExistsError:
-            self.notify('檔案已存在，請選擇新的檔名。', True)
-        except OSError:
-            self.notify('無法匯出診斷資料，請確認目的資料夾可寫入。', True)
-
     @Property('QVariantMap', notify=changed)
     def task(self):
         view = task_view(self._task_snapshot, self._guard, self._running, self._stop.is_set())
+        view['can_book'] = view['can_book'] and not self.running
         view['step'] = {'prepare': 0, 'schedule': 1, 'homepage': 2, 'captcha_image': 2, 'ocr': 2,
                         'query': 2, 'select_train': 3, 'submit_ticket': 4, 'parse_result': 4}.get(self._stage, 0)
         if self._summary_warning:
@@ -314,18 +272,6 @@ class DesktopController(QObject):
     def version(self):
         return VERSION
 
-    @Property(bool, notify=changed)
-    def updateChecking(self):
-        return self._update_checking
-
-    @Property(bool, notify=changed)
-    def updateAvailable(self):
-        return self._update_available
-
-    @Property(str, notify=changed)
-    def updateMessage(self):
-        return self._update_message
-
     @Property('QVariantMap', notify=formChanged)
     def form(self):
         return self._form
@@ -342,6 +288,10 @@ class DesktopController(QObject):
     def countdown(self):
         return self._countdown
 
+    @Property(str, notify=changed)
+    def retryReason(self):
+        return self._retry_reason if self._running and self._stage == 'retry_wait' else ''
+
     @Property('QStringList', constant=True)
     def stations(self):
         return STATIONS
@@ -349,6 +299,23 @@ class DesktopController(QObject):
     @Property('QVariantList', notify=changed)
     def records(self):
         return self._records
+
+    @Property(int, notify=changed)
+    def recordCount(self):
+        return len(self._records)
+
+    @Property(int, notify=changed)
+    def currentRecordCount(self):
+        return self.search_index().current_count
+
+    def search_index(self):
+        if self._record_search.source is not self._records:
+            self._record_search = RecordSearchIndex(self._records)
+        return self._record_search
+
+    @Slot(bool, str, str, int, int, result='QVariantMap')
+    def recordPageData(self, history, search, date, status, page):
+        return self.search_index().page(history, search, date, status, page)
 
     @Property(str, notify=changed)
     def status(self):
@@ -368,7 +335,8 @@ class DesktopController(QObject):
 
     @Property(bool, notify=changed)
     def running(self):
-        return self._running or self._storage.busy
+        return (self._running or self._storage.busy or self._backup.busy or self._management.busy
+                or self._retention.busy or self._ocr_lab.busy)
 
     @Property(bool, notify=changed)
     def error(self):
@@ -396,7 +364,7 @@ class DesktopController(QObject):
 
     @Slot(str, str)
     def setField(self, key, value):
-        if not self._running and key in self._form:
+        if not self.running and key in self._form:
             self._form[key] = value
             self.formChanged.emit()
             if key in self._issues:
@@ -409,13 +377,13 @@ class DesktopController(QObject):
 
     @Slot()
     def swap(self):
-        if not self._running:
+        if not self.running:
             a, b = self._form['start_station'], self._form['dest_station']
             self._form.update(start_station=b, dest_station=a)
             self.formChanged.emit()
 
     def load_path(self, path):
-        if self._running or self._storage.busy:
+        if self.running:
             return False
         try:
             raw = json.loads(Path(path).read_text(encoding='utf-8-sig'))
@@ -440,7 +408,7 @@ class DesktopController(QObject):
             self.remember()
             QTimer.singleShot(0, self.checkStorageRecovery)
             return True
-        except ConfigVersionError as exc:
+        except (ConfigVersionError, ConfigRestoreError) as exc:
             self.notify(str(exc), True)
             return False
         except (ValueError, OSError, TypeError):
@@ -449,7 +417,7 @@ class DesktopController(QObject):
 
     @Slot()
     def load(self):
-        if self._running or self._storage.busy:
+        if self.running:
             return
         if self.dirty:
             self.confirmRequested.emit('load')
@@ -474,6 +442,7 @@ class DesktopController(QObject):
         except FieldError as exc:
             self._issues[exc.field] = str(exc)
             self.changed.emit()
+            self.validationFailed.emit(exc.field)
             raise
         except ValidationError as exc:
             for error in exc.errors():
@@ -484,6 +453,7 @@ class DesktopController(QObject):
                            '__root__': '請檢查起訖站不同、票數合計 1～10，以及日期與時間先後順序。'}
                 self._issues[key] = details.get(key, '請檢查格式與範圍。')
             self.changed.emit()
+            self.validationFailed.emit(next((key for key in self._issues if key != '__root__'), '__root__'))
             raise
         if protected_config_path(self.path):
             raise ValueError('範本不能直接儲存，請先在設定頁另存個人設定。')
@@ -497,19 +467,19 @@ class DesktopController(QObject):
 
     @Slot()
     def save(self):
-        if self._running or self._storage.busy:
+        if self.running:
             return
         try:
             self.save_config()
             self.notify('設定已儲存。')
-        except ConfigVersionError as exc:
+        except (ConfigVersionError, ConfigRestoreError) as exc:
             self.notify(str(exc), True)
         except (ValueError, OSError):
             self.notify('儲存失敗：請檢查日期、時段、票數、身分證與儲存位置。', True)
 
     @Slot()
     def saveAs(self):
-        if self._running or self._storage.busy:
+        if self.running:
             return
         # Do not detach the active state from its config by silently copying just JSON.
         if record_paths(self.path)[0].exists():
@@ -531,7 +501,7 @@ class DesktopController(QObject):
 
     @Slot(bool)
     def start(self, query_only):
-        if self._running or self._storage.busy:
+        if self.running:
             return
         if not query_only and record_paths(self.path)[0].exists():
             self.navigate(3)
@@ -549,7 +519,7 @@ class DesktopController(QObject):
         self._recovery = ''
         self._received_done = False
         self._received_completion = False
-        self._notification_emitted = False
+        self._tools.begin_task()
         self._running, self._attempt, self._log = True, 0, ''
         self._match = {}
         self._phase = '準備啟動'
@@ -565,7 +535,7 @@ class DesktopController(QObject):
             self.persist_task('operation_failed')
             self._phase = '任務無法啟動'
             self.notify('無法啟動背景工作，請關閉並重新開啟 App。', True)
-            self.notify_task_finished()
+            self._tools.notify_task_finished()
 
     @Slot()
     def stop(self):
@@ -574,6 +544,16 @@ class DesktopController(QObject):
 
     @Slot()
     def requestClose(self):
+        if self._management.busy or self._retention.busy or self._ocr_lab.busy:
+            self._extras_closing = True
+            self._management.stop()
+            self._retention.cancel()
+            self._ocr_lab.cancel()
+            return
+        if self._backup.busy:
+            self._backup_closing = True
+            self._backup.cancel()
+            return
         if self._history.busy and not self._running and not self._storage.busy:
             self._history_closing = True
             self._history.cancel()
@@ -586,7 +566,7 @@ class DesktopController(QObject):
             self._storage_closing = True
             self._storage.cancel()
             return
-        if self._running or self._storage.busy:
+        if self.running:
             self._closing = True
             self.stop()
         elif self.dirty:
@@ -618,6 +598,17 @@ class DesktopController(QObject):
 
     @Slot()
     def poll(self):
+        self._management.poll()
+        self._retention.poll()
+        self._ocr_lab.poll()
+        if self._extras_closing and not (self._management.busy or self._retention.busy or self._ocr_lab.busy):
+            self._extras_closing = False
+            self.requestClose()
+        self._backup.poll()
+        if self._backup_closing and not self._backup.busy:
+            self._backup_closing = False
+            self.requestClose()
+        self._tools.poll()
         self._history.poll()
         if self._history_closing and not self._history.busy:
             self._history_closing = False
@@ -640,11 +631,15 @@ class DesktopController(QObject):
                 if value.startswith('等待啟動時間'):
                     self._stage = 'schedule'
             elif kind == 'event':
-                clean = safe_event(value)
-                if clean:
-                    self._diagnostic_events.append(clean)
+                self._tools.record_event(value)
                 if value.get('phase'):
                     self._stage = value['phase']
+                if value.get('event') == 'retry_scheduled':
+                    self._retry_until = time.monotonic() + value['delay_seconds']
+                    self._retry_reason = {'network_retry': '連線暫時失敗', 'captcha_rejected': '驗證碼未通過',
+                                          'ocr_no_candidate': '辨識結果不可靠',
+                                          'no_matching_train': '沒有符合條件的車次'}.get(value.get('outcome'), '準備重查')
+                    self._phase = '等待下一次查詢'
                 self._attempt = value.get('attempt', self._attempt)
                 if value.get('event') == 'train_selected':
                     self._match = {key: value[key] for key in ('train_id', 'depart', 'arrive')}
@@ -664,10 +659,6 @@ class DesktopController(QObject):
                 self.persist_task(value['code'])
                 self._error = value['code'] not in ('success', 'stopped')
                 self._recovery = value['action']
-            elif kind == 'update':
-                self._update_checking = False
-                self._update_message = value['message']
-                self._update_available = value['available']
         # Join before another task can start, including the short gap after its done event.
         if self._thread is not None and not self._thread.is_alive():
             dirty = True
@@ -679,13 +670,16 @@ class DesktopController(QObject):
                 self._phase = '任務非預期結束'
                 self.notify('任務未回傳完成狀態；請先在我的訂位確認結果，勿直接重送。', True)
             self.refresh()
-            self.notify_task_finished()
+            self._tools.notify_task_finished()
             if self._closing:
                 self._closing = False
                 self.requestClose()
         if dirty:
             self.changed.emit()
         countdown = ''
+        if self._running and self._stage == 'retry_wait':
+            seconds = max(0, math.ceil(self._retry_until - time.monotonic()))
+            countdown = f'{seconds} 秒後重查'
         if self._running and self._phase.startswith('等待啟動時間'):
             target = datetime.fromisoformat(self._form['start_at']).replace(tzinfo=TAIPEI)
             seconds = max(0, int((target - datetime.now(TAIPEI)).total_seconds()))
@@ -713,6 +707,9 @@ class DesktopController(QObject):
         if config != self.path:
             return
         self._records = entries
+        prepared = self._record_loader.search_index
+        self._record_search = (prepared if prepared is not None and prepared.source is entries
+                               else RecordSearchIndex(entries))
         if error:
             self.notify(error['title'] + '；' + error['guidance'], True)
         self.changed.emit()
@@ -731,7 +728,7 @@ class DesktopController(QObject):
 
     @Slot(str)
     def archive(self, code):
-        if self._running or self._storage.busy:
+        if self.running:
             return
         try:
             archive_booking(self.path, code, output=io.StringIO())
@@ -742,7 +739,7 @@ class DesktopController(QObject):
 
     @Slot(str, str, str, bool)
     def resolve(self, fingerprint, outcome, code, confirmed):
-        if self._running or self._storage.busy:
+        if self.running:
             return
         try:
             resolve_pending(self.path, outcome, fingerprint, confirmed=confirmed, code=code)
@@ -768,7 +765,7 @@ class DesktopController(QObject):
 
     @Slot(str, str, bool)
     def confirmCancellation(self, code, fingerprint, confirmed):
-        if self._running or self._storage.busy:
+        if self.running:
             return
         try:
             confirm_cancelled(self.path, code, fingerprint, confirmed)
@@ -786,34 +783,3 @@ class DesktopController(QObject):
     @Slot()
     def folder(self):
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.path.parent)))
-
-    @Slot()
-    def checkEnvironment(self):
-        from thsr_ticket.remote.native_browser import browser_executable
-        try:
-            browser_executable('chrome')
-            chrome = 'Chrome 可用'
-        except RuntimeError:
-            chrome = '未找到 Chrome，請先安裝'
-        dependencies = all(importlib.util.find_spec(name) for name in ('playwright', 'ddddocr', 'onnxruntime'))
-        self.notify(chrome + ('；自動化套件已安裝。' if dependencies else '；缺少自動化套件，請安裝桌面依賴。'))
-
-    @Slot()
-    def checkUpdates(self):
-        if self._running or self._update_checking:
-            return
-        self._update_checking = True
-        self._update_message = '正在檢查 GitHub 正式版本…'
-        self.changed.emit()
-
-        def check():
-            try:
-                result = check_release(VERSION)
-            except Exception:
-                result = {'message': '無法檢查更新，現有版本仍可使用。稍後可再試。', 'available': False}
-            self._messages.put(('update', result))
-        threading.Thread(target=check, daemon=True).start()
-
-    @Slot()
-    def releasePage(self):
-        QDesktopServices.openUrl(QUrl(RELEASES))

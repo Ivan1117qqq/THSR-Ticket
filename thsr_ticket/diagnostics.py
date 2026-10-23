@@ -7,9 +7,9 @@ from thsr_ticket.task_status import CODES
 from thsr_ticket.version import VERSION
 
 EVENTS = {'stage', 'attempt_finished', 'run_started', 'run_stopped', 'run_finished',
-          'ocr', 'result_save_failed', 'state_update_failed', 'task_completed'}
+          'ocr', 'result_save_failed', 'state_update_failed', 'task_completed', 'retry_scheduled'}
 PHASES = {'prepare', 'schedule', 'homepage', 'captcha_image', 'ocr', 'query',
-          'select_train', 'submit_ticket', 'parse_result', 'preflight', 'browser_start', 'ocr_load'}
+          'select_train', 'submit_ticket', 'parse_result', 'preflight', 'browser_start', 'ocr_load', 'retry_wait'}
 REASONS = {'interrupted', 'booking_unconfirmed', 'network_timeout', 'http_error', 'network_error',
            'website_rejected', 'ocr_unavailable', 'invalid_response_or_config', 'operation_failed',
            'preflight', 'browser_start', 'ocr_load', 'network', 'stopped'}
@@ -29,12 +29,16 @@ def safe_event(value):
     if type(attempt) is int and 0 <= attempt <= 1000000:
         result['attempt'] = attempt
     for key, choices in [('reason', REASONS), ('outcome', REASONS | {
-            'completed', 'failed', 'success', 'attempt_limit', 'candidate', 'no_candidate'})]:
+            'completed', 'failed', 'success', 'attempt_limit', 'candidate', 'no_candidate',
+            'network_retry', 'captcha_rejected', 'ocr_no_candidate', 'no_matching_train'})]:
         if allowed(value.get(key), choices):
             result[key] = value[key]
     elapsed = value.get('elapsed_ms')
     if type(elapsed) in (int, float) and 0 <= elapsed <= 86400000 and math.isfinite(elapsed):
         result['elapsed_ms'] = round(elapsed, 3)
+    delay = value.get('delay_seconds')
+    if type(delay) in (int, float) and math.isfinite(delay) and 0 <= delay <= 86400:
+        result['delay_seconds'] = round(delay, 3)
     return result
 
 

@@ -40,3 +40,15 @@ def test_gate_preserves_existing_test_failure():
     session = SimpleNamespace(exitstatus=pytest.ExitCode.TESTS_FAILED)
     gate.pytest_sessionfinish(session, session.exitstatus)
     assert session.exitstatus == pytest.ExitCode.TESTS_FAILED
+
+
+@pytest.mark.parametrize('skipped', [False, True])
+def test_new_feature_suite_cannot_disappear_from_desktop_gate(skipped):
+    gate = DesktopGate()
+    for name in gate.required - {'test_feature_desktop.py'}:
+        gate.pytest_runtest_logreport(report(name + '::test_one'))
+    if skipped:
+        gate.pytest_collectreport(report('test_feature_desktop.py', skipped=True, when=None))
+    session = SimpleNamespace(exitstatus=0)
+    gate.pytest_sessionfinish(session, 0)
+    assert session.exitstatus == pytest.ExitCode.TESTS_FAILED
