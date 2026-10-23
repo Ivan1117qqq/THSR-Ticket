@@ -24,3 +24,5 @@ booking.local.json
 .thsr-backup-*.tmp
 TravelDesk-Restored-*/
 .travel-desk-restore-pending.json
+journey-templates.json
+journey-reminders.json
