@@ -61,6 +61,25 @@ ScrollView {
                 Caption {visible:page.backend.tools.notificationsEnabled && page.backend.tools.notificationsAvailable; text:'未看到通知時，請檢查 Windows 通知與勿擾設定。'}
             }
             Card {
+                Layout.fillWidth:true; title:'繳費期限提醒'; subtitle:'App 開啟期間，提醒即將到期的本機訂位。'
+                PreferenceSwitch {
+                    objectName:'paymentReminderSwitch'; text:'啟用繳費期限提醒'
+                    checked:page.backend.planner.remindersEnabled
+                    onClicked:page.backend.planner.setReminders(checked,page.backend.planner.leadMinutes)
+                }
+                RowLayout {
+                    Caption {text:'提前提醒'}
+                    ComboBox {
+                        objectName:'paymentReminderLead'; Accessible.name:'繳費期限提前提醒時間'
+                        model:['1 小時','3 小時','1 天']; implicitHeight:42
+                        currentIndex:[60,180,1440].indexOf(page.backend.planner.leadMinutes)
+                        onActivated:page.backend.planner.setReminders(page.backend.planner.remindersEnabled,[60,180,1440][currentIndex])
+                    }
+                }
+                Caption {text:'需同時啟用桌面通知。期限必須有完整日期與時間；可從總覽待辦核對並設定本機期限。關閉 App 後不會提醒。'}
+                Caption {text:page.backend.planner.reminderMessage; visible:text!==''}
+            }
+            Card {
                 Layout.fillWidth:true; title:'個人資料保護'
                 PreferenceSwitch {
                     objectName:'privacySwitch'; text:'以 Windows 帳號保護證號與手機'

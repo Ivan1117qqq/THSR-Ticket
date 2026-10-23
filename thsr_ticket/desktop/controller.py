@@ -33,6 +33,8 @@ from thsr_ticket.desktop.retention import RetentionManager
 from thsr_ticket.desktop.ocr_lab import OcrLab
 from thsr_ticket.task_status import load_task, save_task, booking_guard, task_view
 from thsr_ticket.record_search import RecordSearchIndex
+from thsr_ticket.journey_planning import PlanningIndex
+from thsr_ticket.desktop.planner import JourneyPlanner
 
 
 def defaults():
@@ -112,6 +114,10 @@ class DesktopController(QObject):
         self._log = ''
         self._tools = DesktopTools(self.data_dir, self.preferences, self.tool_context, self)
         self._tools.notice.connect(self.notify)
+        self._planner = JourneyPlanner(self.data_dir, self.preferences, self.planning_context, self)
+        self._planner.applyRequested.connect(self.apply_template)
+        self._planner.desktopNotification.connect(self._tools.desktopNotification.emit)
+        self._tools.notificationsChanged.connect(lambda _: self._planner.tick(force=True))
         self._history = self._tools.historyDiagnostics
         self._history_closing = False
         self._storage = StorageManager(self)
@@ -155,8 +161,26 @@ class DesktopController(QObject):
 
     @Slot(str)
     def openNotification(self, target):
-        if target in ('records', 'progress', 'settings'):
-            self.navigate({'records': 3, 'progress': 2, 'settings': 4}[target])
+        if target in ('records', 'progress', 'settings', 'overview'):
+            self.navigate({'records': 3, 'progress': 2, 'settings': 4, 'overview': 0}[target])
+
+    @Property(QObject, constant=True)
+    def planner(self):
+        return self._planner
+
+    def planning_context(self):
+        return {'running': self.running, 'loading': self._record_loader.busy,
+                'notifications': self._tools.notificationsEnabled,
+                'notification_available': self._tools.notificationsAvailable}
+
+    def apply_template(self, values):
+        if self.running:
+            return
+        self._form.update(values)
+        self._issues = {}
+        self.formChanged.emit()
+        self.navigate(1)
+        self.notify('已套用常用行程；請確認搭車日期與啟動時間，再儲存或開始。')
 
     @Property(QObject, constant=True)
     def tools(self):
@@ -614,6 +638,7 @@ class DesktopController(QObject):
             self._history_closing = False
             self.requestClose()
         self._record_loader.poll()
+        self._planner.tick()
         if self._records_closing and not self._record_loader.busy:
             self._records_closing = False
             self.requestClose()
@@ -710,6 +735,9 @@ class DesktopController(QObject):
         prepared = self._record_loader.search_index
         self._record_search = (prepared if prepared is not None and prepared.source is entries
                                else RecordSearchIndex(entries))
+        planning = self._record_loader.planning_index
+        self._planner.update_records(config, planning if planning is not None and planning.source is entries
+                                     else PlanningIndex(entries))
         if error:
             self.notify(error['title'] + '；' + error['guidance'], True)
         self.changed.emit()
@@ -723,6 +751,7 @@ class DesktopController(QObject):
             self._records = []
             self._record_loader.report = {}
             self._records_source = self.path
+            self._planner.update_records(self.path, PlanningIndex([]))
         self._record_loader.request(self.path)
         self.changed.emit()
 

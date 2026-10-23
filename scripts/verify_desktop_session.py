@@ -190,6 +190,31 @@ def main():
             control('decrease_adult_tickets').forceActiveFocus()
             QTest.keyClick(window, Qt.Key_Space)
             checks['keyboard_decrease_ticket'] = controller.form['adult_tickets'] == '1'
+            controller.setField('max_attempts', '60')
+            controller.planner.saveTemplate('native preset', controller.form, '')
+            control('journeyTemplatesButton').forceActiveFocus()
+            QTest.keyClick(window, Qt.Key_Space)
+            QTest.qWait(200)
+            checks['preset_dialog_keyboard'] = control('templateDialog').property('visible')
+            control('templateList').setProperty('currentIndex', 0)
+            original = dict(controller.form)
+            controller.setField('dest_station', '台中' if original['dest_station'] != '台中' else '左營')
+            control('applyTemplateButton').forceActiveFocus()
+            QTest.keyClick(window, Qt.Key_Space)
+            QTest.qWait(200)
+            checks['preset_applied'] = all(controller.form[key] == original[key] for key in (
+                'dest_station', 'personal_id', 'phone_num', 'outbound_date', 'start_at'))
+            controller.navigate(0)
+            viewport = control('overviewPage').property('contentItem')
+            offset = max(0, viewport.property('contentHeight') - viewport.property('height'))
+            viewport.setProperty('contentY', offset)
+            before = controller.planner.calendar['title']
+            control('nextJourneyMonth').forceActiveFocus()
+            QTest.keyClick(window, Qt.Key_Space)
+            checks['calendar_keyboard'] = controller.planner.calendar['title'] != before
+            QTest.qWait(150)
+            checks['planner_frame_saved'] = window.grabWindow().save(
+                str(target.with_name(target.stem + '-planner.png')))
             # The forwarding path is simulated; this is not a real toast click.
             notifications.opened.connect(lambda target: (controller.openNotification(target), activate_window(window)))
             notifications.opened.emit('settings')
@@ -232,6 +257,7 @@ def main():
                 'keyboard_search', 'tab_to_date', 'keyboard_increase_ticket', 'keyboard_decrease_ticket',
                 'date_month_length', 'date_cancel_preserves_value', 'date_wheels_scroll', 'date_wheel_drag',
                 'date_frame_saved', 'date_applied', 'date_reopened_value',
+                'preset_dialog_keyboard', 'preset_applied', 'calendar_keyboard', 'planner_frame_saved',
                 'accessible_names', 'keyboard_settings_tab', 'invalid_field_focus', 'frame_saved',
                 'notification_forwarding_simulated')
     if warnings or not all(checks[name] for name in required):

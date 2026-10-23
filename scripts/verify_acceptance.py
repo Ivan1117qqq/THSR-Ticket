@@ -26,6 +26,9 @@ MANUAL = [
     {'id': 'U5', 'name': '歷史整理、還原與永久清理', 'status': 'not_run'},
     {'id': 'U6', 'name': '通知實際顯示、點擊及視窗喚回', 'status': 'not_run'},
     {'id': 'U7', 'name': '完整鍵盤與螢幕閱讀器操作', 'status': 'not_run'},
+    {'id': 'U8', 'name': '常用行程範本與套用欄位保留', 'status': 'not_run'},
+    {'id': 'U9', 'name': '行程月曆與繳費／核對待辦', 'status': 'not_run'},
+    {'id': 'U10', 'name': '本機期限確認與繳費提醒實際通知', 'status': 'not_run'},
     {'id': 'L1', 'name': '官網核對、訂位／取消與回查', 'status': 'needs_data'},
     {'id': 'L2', 'name': '人工標註高鐵圖片的 OCR 評估', 'status': 'needs_data'},
 ]
@@ -150,6 +153,7 @@ def verify_artifact(output, name):
                                       not value.get('oversized_line_rejected')):
             raise ValueError('Performance checks incomplete')
         if name.startswith('native-') and not all(value.get('checks', {}).get(key) is True for key in (
+                'preset_dialog_keyboard', 'preset_applied', 'calendar_keyboard', 'planner_frame_saved',
                 'maximized_preserved', 'restored', 'active_window', 'keyboard_navigation', 'keyboard_search',
                 'tab_to_date', 'keyboard_increase_ticket', 'keyboard_decrease_ticket', 'accessible_names',
                 'date_month_length', 'date_cancel_preserves_value', 'date_wheels_scroll', 'date_wheel_drag',

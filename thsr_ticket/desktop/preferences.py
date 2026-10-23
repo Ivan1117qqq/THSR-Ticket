@@ -24,8 +24,14 @@ class Preferences:
         data = self.read()
         return {key: value for key, value in data.items()
                 if (key == 'last_config' and isinstance(value, str))
-                or (key == 'desktop_notifications' and type(value) is bool)}
+                or (key in ('desktop_notifications', 'payment_reminders') and type(value) is bool)
+                or (key == 'payment_reminder_minutes' and type(value) is int and value in (60, 180, 1440))}
 
     def notifications(self, enabled):
         self.path.parent.mkdir(parents=True, exist_ok=True)
         atomic_json(self.path, {**self._known(), 'desktop_notifications': bool(enabled)})
+
+    def payment_reminders(self, enabled, minutes):
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        atomic_json(self.path, {**self._known(), 'payment_reminders': bool(enabled),
+                                'payment_reminder_minutes': minutes})

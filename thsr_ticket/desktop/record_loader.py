@@ -8,6 +8,7 @@ from thsr_ticket.booking_records import record_entries
 from thsr_ticket.scan_report import ScanReport, ScanCancelled
 from thsr_ticket.storage_errors import error_info, StorageError
 from thsr_ticket.record_search import RecordSearchIndex
+from thsr_ticket.journey_planning import PlanningIndex
 
 
 class RecordLoader(QObject):
@@ -20,6 +21,7 @@ class RecordLoader(QObject):
         self.report = {}
         self.error = {}
         self.search_index = None
+        self.planning_index = None
         self._generation = 0
         self._pending = None
         self._thread = None
@@ -51,11 +53,12 @@ class RecordLoader(QObject):
             try:
                 entries = record_entries(config, cancel=cancel, report=report)
                 index = RecordSearchIndex(entries, cancel)
-                self._queue.put((generation, config, entries, report.snapshot(), {}, index))
+                planning = PlanningIndex(entries, cancel)
+                self._queue.put((generation, config, entries, report.snapshot(), {}, index, planning))
             except ScanCancelled:
-                self._queue.put((generation, config, [], {}, {}, None))
+                self._queue.put((generation, config, [], {}, {}, None, None))
             except Exception as error:
-                self._queue.put((generation, config, [], report.snapshot(), error_info(error), None))
+                self._queue.put((generation, config, [], report.snapshot(), error_info(error), None, None))
 
         self._thread = threading.Thread(target=work, daemon=False)
         try:
@@ -82,6 +85,6 @@ class RecordLoader(QObject):
         else:
             self.busy = False
             if result is not None:
-                _, config, entries, self.report, self.error, self.search_index = result
+                _, config, entries, self.report, self.error, self.search_index, self.planning_index = result
                 self.loaded.emit(config, entries, self.error)
         self.changed.emit()

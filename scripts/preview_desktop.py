@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 import tempfile
+from datetime import datetime, timedelta
 from pathlib import Path
 
 
@@ -24,6 +25,8 @@ def main():
     from PySide6.QtTest import QTest
     from shiboken6 import delete as delete_qml
     from thsr_ticket.desktop.controller import DesktopController
+    from thsr_ticket.automation import TAIPEI
+    from thsr_ticket.journey_planning import PlanningIndex
 
     QQuickStyle.setStyle('Basic')
     app = QApplication([])
@@ -41,6 +44,10 @@ def main():
         controller.tools.set_notification_support(True)
         controller.tools.setNotifications(True)
         controller._form['personal_id'] = 'DEMO123456'
+        preview_now = datetime.now(TAIPEI)
+        preview_day = (preview_now + timedelta(days=2)).date().isoformat()
+        controller.planner.clock = lambda: preview_now
+        controller.planner.saveTemplate('週末返家', controller.form, '')
         engine = QQmlApplicationEngine()
         warnings = []
         engine.warnings.connect(lambda errors: warnings.extend(str(error) for error in errors))
@@ -58,9 +65,12 @@ def main():
                 controller._record_loader.poll()
             controller._records = [{'status': 'booked', 'code': 'DEMO1234', 'current': True,
                                     'ticket': {'start_station': '台北', 'dest_station': '台中',
-                                               'date': '示範日期', 'depart_time': '09:31', 'train_id': '0117',
+                                               'date': preview_day, 'depart_time': '09:31', 'train_id': '0117',
                                                'seat': '9 車 3E', 'price': 'TWD 700',
-                                               'payment_deadline': '示範期限', 'ticket_num_info': '成人 1 張'}}]
+                                               'payment_deadline': (preview_now + timedelta(hours=2)).strftime(
+                                                   '%Y-%m-%d %H:%M'), 'ticket_num_info': '成人 1 張'}}]
+            controller.planner.update_records(controller.path, PlanningIndex(controller._records))
+            controller.planner.selectDate(preview_day)
             controller._record_loader.report = {'accepted': 1, 'skipped': 0, 'failed': 0, 'reasons': []}
             controller.changed.emit()
             for _ in range(30):
@@ -68,6 +78,34 @@ def main():
             frame = window.grabWindow()
             if not frame.save(str(destination / f'page-{page}-scale-{args.scale}.png')):
                 raise RuntimeError('Failed to save preview')
+            if page == 0:
+                viewport = window.findChild(QObject, 'overviewPage').property('contentItem')
+                calendar = window.findChild(QObject, 'journeyCalendarCard')
+                from PySide6.QtCore import QPointF
+                point = calendar.mapToItem(viewport.property('contentItem'), QPointF(0, 0))
+                viewport.setProperty('contentY', point.y() - 8)
+                QTest.qWait(100)
+                if not window.grabWindow().save(str(destination / f'agenda-scale-{args.scale}.png')):
+                    raise RuntimeError('Failed to save agenda preview')
+                viewport.setProperty('contentY', 0)
+        QMetaObject.invokeMethod(window.findChild(QObject, 'templateDialog'), 'open')
+        QTest.qWait(180)
+        window.findChild(QObject, 'templateList').setProperty('currentIndex', 0)
+        QTest.qWait(100)
+        if not window.grabWindow().save(str(destination / f'templates-scale-{args.scale}.png')):
+            raise RuntimeError('Failed to save templates preview')
+        QMetaObject.invokeMethod(window.findChild(QObject, 'templateDialog'), 'close')
+        QTest.qWait(180)
+        deadline_dialog = window.findChild(QObject, 'deadlineDialog')
+        deadline_dialog.setProperty('record', controller.planner.agenda['items'][0])
+        window.findChild(QObject, 'localDeadlineInput').setProperty(
+            'text', (preview_now + timedelta(hours=2)).strftime('%Y-%m-%d %H:%M'))
+        QMetaObject.invokeMethod(deadline_dialog, 'open')
+        QTest.qWait(180)
+        if not window.grabWindow().save(str(destination / f'deadline-scale-{args.scale}.png')):
+            raise RuntimeError('Failed to save deadline preview')
+        QMetaObject.invokeMethod(deadline_dialog, 'close')
+        QTest.qWait(180)
         controller.navigate(1)
         original_date = controller.form['outbound_date']
         controller.setField('outbound_date', '2024-02-29')

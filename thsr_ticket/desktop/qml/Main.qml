@@ -93,10 +93,13 @@ ApplicationWindow {
 
                 OverviewPage {
                     backend:window.backend
+                    onTemplatesRequested:templateDialog.open()
+                    onDeadlineRequested:deadlineDialog.showRecord(record)
                 }
 
                 JourneyPage {
                     backend:window.backend
+                    onTemplatesRequested:templateDialog.open()
                 }
 
                 ProgressPage {
@@ -157,4 +160,6 @@ ApplicationWindow {
     ManagementDialog {backend:window.backend; id:managementDialog}
     RetentionDialog {backend:window.backend; id:retentionDialog}
     OcrLabDialog {backend:window.backend; id:ocrLabDialog}
+    TemplateDialog {backend:window.backend; id:templateDialog}
+    DeadlineDialog {backend:window.backend; id:deadlineDialog}
 }
