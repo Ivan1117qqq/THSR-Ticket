@@ -6,15 +6,22 @@
 既有命令列流程已有使用者回報實站訂位成功；**新版 Qt 桌面介面目前完成離線驗證，尚未進行實站訂位驗收**。
 查詢速度取決於網頁載入、辨識及網站回應，不保證搶票成功。
 
+2026-10-23 原始碼已完成年月日滾輪、集中驗收工具、行程核對、搜尋索引／快取、Windows 視窗喚回及隔離 Chrome 關閉清理修正；最新本機完整驗證為 **493 項通過、1 項實站測試跳過**，包含十項實際瀏覽器測試。官網核對／取消與真實 OCR 準確率仍待指定測試資料；通知實際點擊與螢幕閱讀器仍需人工觀察。安裝包維持暫緩，操作見 [集中驗收清單](docs/acceptance.md)，交付範圍見 [確認文件](docs/optimization-audit.md)。
+
 ## 從頭學習與維護專案
 
+- [集中驗收清單](docs/acceptance.md)：一鍵自動檢查、可操作的隔離假資料視窗，以及 U1–U7／L1–L2 的步驟與回報格式。
 - [完整開發與架構指南](docs/development-guide.md)：從入口、QML、背景執行緒到訂位、防重送、測試與打包，依程式執行順序逐段說明。
 - [逐檔用途與清理紀錄](docs/file-inventory.md)：列出原始碼、測試、工具與文件用途，說明哪些歷史程式已移除、哪些相容功能仍需保留。
-- [後續優化與驗收計畫](docs/roadmap.md)：依優先順序列出各項現況、剩餘缺口、對應程式與完成條件。
+- [開發範圍與驗收狀態](docs/roadmap.md)：分開列出已完成、外部驗收及未排程選配，避免待辦不斷擴大。
 - [介面遷移設計背景](docs/app-architecture.md)：保留 Qt 改版時的取捨，現行實作以完整指南為準。
 - [發行與依賴管理](docs/releasing.md)：版本來源、執行／開發／打包環境及安裝升級驗收。
 - [版本紀錄](CHANGELOG.md)：各版交付功能摘要。
 - [歷史診斷與桌面通知](docs/history-diagnostics.md)：過去任務的問題定位、診斷匯出及通知設定。
+- [桌面介面與工具分層](docs/desktop-ui.md)：設定分頁、測試通知、錯誤欄位聚焦與程式責任。
+- [完整備份與還原](docs/backup.md)：目前設定與關聯紀錄的封裝、新位置還原、衝突及防重送規則。
+- [優化交付與驗收邊界](docs/optimization-audit.md)：固定五項收尾結果，以及先前斷線核對、取消、重試、清理、介面效能與 OCR 的實作範圍。
+- [官網訂位核對與取消](docs/booking-management.md)：實驗性查詢同步與未付款單程取消流程，仍待實站驗收。
 
 ## 安裝
 
@@ -44,6 +51,7 @@ python -m venv .venv
 
 目前工作區請使用 `.\.venv\windows\Scripts\python.exe -m thsr_ticket.desktop`。
 新版採固定側欄、行程卡片、日期選擇與眼睛遮蔽切換；分為總覽、新增行程、任務進度、我的訂位及設定。
+搭車日期與啟動日期改用年／月／日三欄滾輪，可上下拖曳、用滑鼠滾輪或方向鍵選擇，按「套用日期」才寫回表單。會處理閏年與各月天數；選啟動日期時保留原本的時、分、秒，取消則保留原值。
 先「載入設定」選擇原本的 `booking.local.json`；會沿用原檔與防重送紀錄。新設定預設存於使用者 App 資料目錄。
 「只查票」不訂位；「自動訂位 · 不付款」會依設定時間查詢並送出訂位，啟動前自動保存與驗證。
 停止與關閉會等待目前操作及瀏覽器清理。既有訂位可在「我的訂位」移至歷史；待確認結果提供官網核對流程。
@@ -51,10 +59,13 @@ python -m venv .venv
 **本機封存不會取消官網訂位。**
 
 詳細操作、資料路徑與 Windows EXE 打包見 [Travel Desk 說明](docs/desktop.md)。
-最新原始碼新增「設定 → 整理歷史紀錄」：支援背景掃描、取消、日期篩選與逐筆勾選，確認後移至可還原備份；可選擇備份批次還原；不取消官網訂位、不釋放磁碟空間。此更新已整合至 0.4.0 安裝包。
+最新介面的紀錄整理入口為「設定 → 資料管理 → 開啟資料管理」（0.4.0 舊入口為「設定 → 整理歷史紀錄」）：支援背景掃描、取消、日期篩選與逐筆勾選，確認後移至可還原備份；可選擇備份批次還原；不取消官網訂位、不釋放磁碟空間。整理功能已整合至 0.4.0，新的分頁入口仍為原始碼更新。
 整理／還原若意外中斷，重開程式會提示「中斷復原」，核對後可回復操作前位置；錯誤畫面會提供原因與處理指引，詳見 [紀錄管理](docs/record-storage.md)。
 「我的訂位」以背景載入並分頁顯示；資料管理掃描會保留可讀結果，列出略過與失敗原因。勾選採逐列更新，整理前僅重驗所選紀錄。
-最新原始碼另提供「設定 → 歷史任務診斷」及預設關閉的桌面通知：可選擇過去任務查看階段與處理建議，預覽後匯出過濾內容；通知點擊可回到相關頁面。這兩項尚未重新打包，現有 0.4.0 EXE 不包含，請從原始碼啟動。操作與限制見 [說明](docs/history-diagnostics.md)。
+搜尋在停止輸入 250 毫秒後套用，按 Enter 或清空則立即更新；背景建立索引並快取篩選結果，換頁不用重新掃描整份清單。
+最新原始碼另提供「設定 → 進階與關於 → 歷史任務診斷」及預設關閉的桌面通知：可選擇過去任務查看階段與處理建議，預覽後匯出過濾內容；通知點擊可回到相關頁面。這兩項尚未重新打包，現有 0.4.0 EXE 不包含，請從原始碼啟動。操作與限制見 [說明](docs/history-diagnostics.md)。
+最新介面已拆分頁面與對話框，設定改為「一般偏好／資料管理／進階與關於」：通知及測試位於一般偏好，歷史診斷位於進階與關於。欄位驗證失敗會展開並聚焦錯誤位置。開發期間先使用原始碼，安裝包待主要流程穩定後再集中驗收；詳見 [介面說明](docs/desktop-ui.md)。
+「設定 → 資料管理 → 完整備份與還原」可預覽並匯出目前已儲存設定及關聯紀錄，驗證後還原到新的資料夾。原有防重送紀錄保留；備份沒有狀態檔時，還原會新增待核對狀態。ZIP 未整體加密，請妥善保管；詳見 [操作與限制](docs/backup.md)。
 0.3.0 提供設定記憶、時間選擇、未儲存提醒、訂位篩選、個資保護與手動更新檢查。
 0.3.1 加入官網取消引導與人工確認封存、查票暫時斷線退避重試，以及網站拒絕原因分類；取消的最後確認仍在官網完成，詳見 [桌面版說明](docs/desktop.md)。
 0.3.2 加入共用任務狀態卡、重新啟動後的任務摘要與對應復原入口；既有訂位狀態優先，不自動恢復或重送任務。
@@ -62,6 +73,19 @@ python -m venv .venv
 0.4.0 整合歷史紀錄管理、中斷復原、背景載入、掃描容錯與分頁，並統一版本及依賴管理。Windows 安裝包位於 `dist/installer/TravelDesk-Setup-0.4.0.exe`，旁附 `.sha256` 與 `dist/release.json`，目前交付未簽章版本。
 這是本機建置產物，不包含在 Git 原始碼中；新 clone 不會自帶 EXE。可依桌面版說明自行打包；手動 Windows CI 可產生 artifact，但不會自動發布 GitHub Release。
 舊 Tk 介面仍可用 `python -m thsr_ticket.gui` 啟動，操作見 [舊版說明](docs/gui.md)。
+
+## 集中檢查與假資料驗收
+
+本機開發環境可一次執行所有已準備的檢查，再開啟隔離視窗親自操作：
+
+```powershell
+.\.venv\windows\Scripts\python.exe -m scripts.verify_acceptance --native
+.\.venv\windows\Scripts\python.exe -m scripts.review_desktop
+```
+
+第一個指令建立新的 `build/acceptance/<時間與識別碼>/` 報告，包含十項原本選用的瀏覽器測試；不跑 `--live`。第二個指令建立假資料及獨立偏好，不讀取日常 AppData；查票／訂位及官網動作會阻擋，只供介面與本機資料操作驗收。可用 `--case pending`、`--case logs`、`--case backup` 直接開啟其他情境，或在畫面載入同份資料夾的設定；`--scale 1.5` 可檢查縮放。
+
+U1–U7 是需要你觀察的七項，官網與 OCR 的 L1、L2 維持待資料。自動報告不會將這些人工項目標成通過；詳細入口、步驟與一次回報格式見 [集中驗收清單](docs/acceptance.md)。
 
 ## 定時自動訂位
 
@@ -100,7 +124,7 @@ notepad booking.local.json
 
 OCR 分數不足或網站明確回覆驗證碼錯誤時，自動模式會等待設定間隔，重新取得首頁與驗證碼；
 每輪都計入 `max_attempts`，驗證碼重試不另設 3 次上限。
-查票階段的暫時逾時、連線錯誤與 HTTP 502／503／504 會退避重試：前兩次至少等待 2、4 秒（設定間隔更長時採設定值），連續第 3 次失敗停止，也受總查詢次數限制。
+查票階段的暫時逾時、連線錯誤與 HTTP 502／503／504 會退避重試。`network_failure_limit` 預設 3，可設 1–100；`max_network_delay_seconds` 預設 30，可設 2–3600 秒。等待依 2、4、8…秒增加至上限，原查詢間隔較長時採原值；也受總查詢次數限制。Qt 進階設定與進度頁提供設定、原因及倒數。
 模型故障、未知網站拒絕、HTTP 403／429 仍停止；選車與最終送出訂位不套用上述網路重試。
 送出最終訂位前會建立 `booking.local.state.json`；成功時保存訂位代碼，結果不明時保留待確認紀錄。
 再次使用同一設定檔訂位會停止，請先至官網確認狀態，再自行處理紀錄，避免重複訂位。
@@ -179,7 +203,7 @@ Qt 圖形介面可在「我的訂位」選取訂位後按「移至歷史」，�
 .\.venv\Scripts\python.exe -m flake8 -j1 --config .config/flake thsr_ticket
 ```
 
-2026-10-23 原始碼本機驗證：**343 項通過、11 項跳過**（10 項選用瀏覽器、1 項實站測試），Flake8 通過。既有 0.4.0 已由乾淨建置環境打包，限制 PATH 後通過 QML、兩款 OCR、Playwright 與 DPAPI 自我檢查；另以不同 AppId 通過 0.3.3 → 0.4.0 升級及解除安裝的假資料保留驗收。新歷史診斷／通知仍只在原始碼；正式 AppId 的獨立乾淨 Windows 與官網驗收仍待完成，詳細紀錄見 [專案驗證](docs/verification.md)。
+2026-10-23 最新集中驗證：**493 項通過、1 項實站測試跳過**，Flake8 通過；十項瀏覽器測試已實際執行。另以真 Chrome 攔截全部請求驗證四種合成管理情境，並完成 10,000 筆 QML 量測、兩套模型載入、100／150% 預覽及三組原生視窗檢查；年月日滾輪亦涵蓋拖曳、滾動、重開、月底及取消。這些不代表實站取消已驗收。未加 `--browser-tests` 的一般回歸仍會跳過十項瀏覽器測試。既有 0.4.0 打包／升級證據保留，後續更新只在原始碼；外部驗收見 [專案驗證](docs/verification.md)。
 測試涵蓋定時等待、次秒間隔、車次篩選、無票重查、成功停止與訂位結果不明時不重送。
 人工 HTML 與本機模擬不能取代實站驗證；Mypy、Pylint 與 CI 尚有待整理項目。
 push／PR 的 CI 設有 Linux 基礎測試與 Windows Qt 桌面測試。Windows 使用 `--require-desktop`，缺少桌面測試套件、整個測試模組未執行或桌面測試跳過都會失敗，選用瀏覽器與實站測試仍預設跳過。JUnit 報告保存在 workflow artifact。
@@ -202,6 +226,10 @@ push／PR 的 CI 設有 Linux 基礎測試與 Windows Qt 桌面測試。Windows 
 | 桌面啟動與資源載入 | [desktop/__main__.py](thsr_ticket/desktop/__main__.py) |
 | 頁面、按鈕、欄位與對話框 | [Main.qml](thsr_ticket/desktop/qml/Main.qml)、[Field.qml](thsr_ticket/desktop/qml/Field.qml) 與同目錄共用元件 |
 | 介面事件、設定切換、背景任務 | [desktop/controller.py](thsr_ticket/desktop/controller.py)、[application.py](thsr_ticket/application.py) |
+| 設定分頁、診斷及桌面工具 | [SettingsPage.qml](thsr_ticket/desktop/qml/SettingsPage.qml)、[desktop/tools.py](thsr_ticket/desktop/tools.py) |
+| 完整備份、驗證及新位置還原 | [backup.py](thsr_ticket/backup.py)、[desktop/backup.py](thsr_ticket/desktop/backup.py)、[BackupDialog.qml](thsr_ticket/desktop/qml/BackupDialog.qml) |
+| 實驗性官網核對與未付款取消 | [official_booking.py](thsr_ticket/official_booking.py)、[booking_management.py](thsr_ticket/remote/booking_management.py)、[desktop/management.py](thsr_ticket/desktop/management.py)、[ManagementDialog.qml](thsr_ticket/desktop/qml/ManagementDialog.qml) |
+| 保留期限與永久純查票日誌清理 | [retention.py](thsr_ticket/retention.py)、[desktop/retention.py](thsr_ticket/desktop/retention.py)、[RetentionDialog.qml](thsr_ticket/desktop/qml/RetentionDialog.qml) |
 | 設定驗證、排程、查票、重試與訂位 | [automation.py](thsr_ticket/automation.py) |
 | 任務摘要、狀態與復原入口 | [task_status.py](thsr_ticket/task_status.py)、[TaskPanel.qml](thsr_ticket/desktop/qml/TaskPanel.qml) |
 | 歷史診斷與過濾匯出 | [history_diagnostics.py](thsr_ticket/history_diagnostics.py)、[desktop/history.py](thsr_ticket/desktop/history.py)、[HistoryDialog.qml](thsr_ticket/desktop/qml/HistoryDialog.qml) |
@@ -211,11 +239,11 @@ push／PR 的 CI 設有 Linux 基礎測試與 Windows Qt 桌面測試。Windows 
 | 設定保存、個資保護、最近檔案 | [config_store.py](thsr_ticket/config_store.py)、[preferences.py](thsr_ticket/desktop/preferences.py) |
 | 瀏覽器與 HTTP 傳輸 | [browser_request.py](thsr_ticket/remote/browser_request.py)、[native_browser.py](thsr_ticket/remote/native_browser.py)、[http_request.py](thsr_ticket/remote/http_request.py) |
 | 網頁車次、訂位結果與錯誤解析 | [avail_trains.py](thsr_ticket/view_model/avail_trains.py)、[booking_result.py](thsr_ticket/view_model/booking_result.py)、[error_feedback.py](thsr_ticket/view_model/error_feedback.py) |
-| OCR 與離線準確率評估 | [captcha.py](thsr_ticket/captcha.py)、[ocr_benchmark.py](thsr_ticket/ocr_benchmark.py) |
+| OCR、圖形標註與離線準確率評估 | [captcha.py](thsr_ticket/captcha.py)、[ocr_benchmark.py](thsr_ticket/ocr_benchmark.py)、[desktop/ocr_lab.py](thsr_ticket/desktop/ocr_lab.py)、[OcrLabDialog.qml](thsr_ticket/desktop/qml/OcrLabDialog.qml) |
 | CLI／舊 Tk 入口 | [main.py](thsr_ticket/main.py)、[gui.py](thsr_ticket/gui.py) |
 | 版本檢查、EXE 與安裝包 | [updates.py](thsr_ticket/desktop/updates.py)、[TravelDesk.spec](TravelDesk.spec)、[TravelDesk.iss](installer/TravelDesk.iss) |
 
-建議下一步補齊新版打包與 Windows 人工通知驗收，再處理介面拆分、資料遷移與保留政策；完整排序與完成條件見 [優化計畫](docs/roadmap.md)。
+開發期優先完善介面、資料保留與核心功能；目前已完成單份設定及關聯紀錄的完整備份／還原。安裝包暫緩，待主要流程定案後集中驗收；完整排序與完成條件見 [優化計畫](docs/roadmap.md)。
 
 ## 專案來源
 
