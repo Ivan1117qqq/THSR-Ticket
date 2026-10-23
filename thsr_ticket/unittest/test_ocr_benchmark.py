@@ -59,3 +59,25 @@ def test_selected_model_is_loaded_once(monkeypatch):
     assert reader.prepare()
     assert reader.prepare()
     loader.assert_called_once_with('beta')
+
+
+def test_manifest_cannot_escape_its_folder(tmp_path):
+    outside = tmp_path / 'outside.png'
+    outside.write_bytes(b'image')
+    folder = tmp_path / 'labels'
+    folder.mkdir()
+    manifest = folder / 'labels.json'
+    manifest.write_text(json.dumps([{'image': '../outside.png', 'label': 'ABCD'}]))
+    with pytest.raises(ValueError):
+        load_samples(manifest)
+
+
+def test_cancelled_evaluation_does_not_score_remaining_images():
+    import threading
+    from thsr_ticket.scan_report import ScanCancelled
+    cancel = threading.Event()
+    cancel.set()
+    reader = Mock(unavailable=False)
+    with pytest.raises(ScanCancelled):
+        evaluate([(b'image', 'ABCD')], reader, cancel=cancel)
+    reader.recognize.assert_not_called()

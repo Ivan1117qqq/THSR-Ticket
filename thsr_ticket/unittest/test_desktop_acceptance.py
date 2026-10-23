@@ -40,7 +40,8 @@ def test_worker_full_booking_flow(tmp_path, scenario):
         client.submit_ticket.assert_not_called()
     else:
         client.submit_ticket.assert_called_once()
-        assert json.loads(state.read_text())['status'] == ('booked' if scenario == 'book' else 'submission_pending')
+        assert json.loads(state.read_text(encoding='utf-8'))['status'] == (
+            'booked' if scenario == 'book' else 'submission_pending')
     client.close.assert_called_once()
     events = list(messages.queue)
     assert events[-1][0] == 'done'

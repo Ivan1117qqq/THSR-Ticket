@@ -157,7 +157,9 @@ def main():
         ('01  行程與車次', [
             'outbound_date', 'class_type', 'start_station', 'dest_station',
             'earliest_departure', 'latest_departure', 'train_ids']),
-        ('02  啟動與重試', ['start_at', 'interval_seconds', 'max_attempts', 'ocr_model']),
+        ('02  啟動與重試', [
+            'start_at', 'interval_seconds', 'max_attempts', 'ocr_model',
+            'network_failure_limit', 'max_network_delay_seconds']),
         ('03  票種與張數', ['adult_tickets', 'child_tickets', 'disabled_tickets', 'elder_tickets', 'college_tickets']),
         ('04  訂票人資料', ['personal_id', 'phone_num']),
     ]
@@ -433,7 +435,7 @@ def main():
             hide()
         converted = {}
         for name, _ in FIELDS:
-            value = data.get(name, '')
+            value = data.get(name, {'network_failure_limit': 3, 'max_network_delay_seconds': 30}.get(name, ''))
             if name in ('start_station', 'dest_station'):
                 value = STATIONS[int(value) - 1] if str(value).isdigit() and 1 <= int(value) <= 12 else ''
             elif name == 'class_type':
@@ -453,7 +455,7 @@ def main():
                     earliest_departure='09:30', latest_departure='23:59', train_ids=[], adult_tickets=1,
                     child_tickets=0, disabled_tickets=0, elder_tickets=0, college_tickets=0,
                     class_type=0, personal_id='', phone_num='', interval_seconds=1, max_attempts=60,
-                    ocr_model='standard')
+                    ocr_model='standard', network_failure_limit=3, max_network_delay_seconds=30)
     populate(defaults)
 
     def validate():

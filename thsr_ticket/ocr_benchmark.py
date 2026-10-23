@@ -6,16 +6,21 @@ import time
 from pathlib import Path
 
 from thsr_ticket.captcha import CaptchaReader
+from thsr_ticket.scan_report import check_cancel
 
 
-def load_samples(manifest):
+def load_samples(manifest, cancel=None):
     manifest = Path(manifest)
+    if manifest.stat().st_size > 2 * 1024 * 1024:
+        raise ValueError('標註檔超過 2 MiB。')
     entries = json.loads(manifest.read_text(encoding='utf-8-sig'))
-    if not isinstance(entries, list) or not entries:
+    if not isinstance(entries, list) or not 1 <= len(entries) <= 5000:
         raise ValueError('標註檔必須是非空 JSON 陣列。')
     samples = []
     seen = set()
+    total = 0
     for entry in entries:
+        check_cancel(cancel)
         if not isinstance(entry, dict) or set(entry) != {'image', 'label'}:
             raise ValueError('每筆標註只能包含 image 與 label。')
         label = entry['label']
@@ -24,19 +29,26 @@ def load_samples(manifest):
         if not isinstance(entry['image'], str) or not entry['image']:
             raise ValueError('image 必須是圖片路徑。')
         path = (manifest.parent / entry['image']).resolve()
+        if not path.is_relative_to(manifest.parent.resolve()) or path.stat().st_size > 5 * 1024 * 1024:
+            raise ValueError('圖片須位於標註資料夾內，且單張不超過 5 MiB。')
         if path in seen:
             raise ValueError('標註檔包含重複的圖片路徑。')
         seen.add(path)
-        samples.append((path.read_bytes(), label.upper()))
+        image = path.read_bytes()
+        total += len(image)
+        if total > 256 * 1024 * 1024:
+            raise ValueError('評估圖片合計超過 256 MiB。')
+        samples.append((image, label.upper()))
     return samples
 
 
-def evaluate(samples, reader, clock=time.perf_counter):
+def evaluate(samples, reader, clock=time.perf_counter, cancel=None):
     if not reader.prepare():
         raise RuntimeError('OCR 模型載入失敗，無法評估。')
     correct = wrong = abstained = 0
     elapsed = 0.0
     for image, label in samples:
+        check_cancel(cancel)
         start = clock()
         guess = reader.recognize(image)
         elapsed += clock() - start

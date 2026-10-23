@@ -118,8 +118,9 @@ def test_automatic_booking_and_restart_guard(runner):
     runner.client.submit_ticket.assert_called_once()
     params = runner.client.submit_ticket.call_args.args[0]
     assert params['dummyId'] == runner.config.personal_id
-    state = json.loads(runner.state_path.read_text())
-    assert state == {'_record_version': 1, 'status': 'booked', 'booking_codes': ['TEST1234']}
+    state = json.loads(runner.state_path.read_text(encoding='utf-8'))
+    assert state['status'] == 'booked' and state['booking_codes'] == ['TEST1234']
+    assert state['ticket']['id'] == 'TEST1234' and state['outbound_date'] == runner.config.outbound_date
     with pytest.raises(RuntimeError, match='已有訂位'):
         runner.run()
     assert runner.client.request_booking_page.call_count == 1
@@ -313,3 +314,33 @@ def test_ocr_model_config_backward_compatible(config):
     assert AutomationConfig(**{**config.dict(), 'ocr_model': 'beta'}).ocr_model == 'beta'
     with pytest.raises(ValidationError):
         AutomationConfig(**{**config.dict(), 'ocr_model': 'unknown'})
+
+
+def test_configurable_network_limit_and_capped_backoff(runner):
+    runner.config.network_failure_limit = 6
+    runner.config.max_network_delay_seconds = 5
+    runner.client.request_booking_page.side_effect = Timeout()
+    with pytest.raises(Timeout):
+        runner.run()
+    assert runner.client.request_booking_page.call_count == 6
+    assert [call.args[0] for call in runner.sleep.call_args_list] == [2, 4, 5, 5, 5]
+    assert not runner.state_path.exists()
+    runner.client.submit_ticket.assert_not_called()
+
+
+@pytest.mark.parametrize('change', [
+    {'network_failure_limit': 0}, {'network_failure_limit': 101}, {'network_failure_limit': True},
+    {'network_failure_limit': 1.5}, {'max_network_delay_seconds': 1}, {'max_network_delay_seconds': float('inf')}])
+def test_invalid_network_policy(config, change):
+    with pytest.raises(ValidationError):
+        AutomationConfig(**{**config.dict(), **change})
+
+
+def test_known_code_is_saved_before_output_failure(runner, monkeypatch):
+    monkeypatch.setattr('thsr_ticket.automation.ShowBookingResult.show', Mock(side_effect=OSError()))
+    with pytest.raises(OSError):
+        runner.run()
+    state = json.loads(runner.state_path.read_text(encoding='utf-8'))
+    assert state['status'] == 'booked' and state['booking_codes'] == ['TEST1234']
+    assert state['ticket']['start_station']
+    runner.client.submit_ticket.assert_called_once()

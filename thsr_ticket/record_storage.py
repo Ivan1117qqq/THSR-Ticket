@@ -17,6 +17,7 @@ from thsr_ticket.storage_journal import (
 )
 
 __all__ = ['inventory', 'move_history', 'restore_history', 'latest_backup', 'backup_batches', 'ScanCancelled']
+BOOKING_PHASES = {'select_train', 'submit_ticket', 'parse_result', 'save_result'}
 
 
 def linked(path):
@@ -28,7 +29,7 @@ class RunSkipped(ValueError):
         self.reason = reason
 
 
-def inspect_run(directory, cancel=None):
+def inspect_run(directory, cancel=None, query_only=False):
     check_cancel(cancel)
     if linked(directory):
         raise RunSkipped('linked')
@@ -42,23 +43,38 @@ def inspect_run(directory, cancel=None):
     if not any(p.name == 'events.jsonl' for p in files):
         raise RunSkipped('unfinished')
     digest, size, last = hashlib.sha256(), 0, {}
+    query_started, booking_activity = False, False
     for path in files:
         digest.update(path.name.encode() + b'\0')
         with path.open('rb') as handle:
             if path.name == 'events.jsonl':
-                for line in handle:
+                for line in iter(lambda: handle.readline(1024 * 1024 + 1), b''):
                     check_cancel(cancel)
+                    if len(line) > 1024 * 1024:
+                        raise RunSkipped('unsupported')
                     digest.update(line)
                     size += len(line)
                     last = validate_record(json.loads(line))
+                    if query_only:
+                        if last.get('event') == 'run_started':
+                            query_started = True
+                            booking_activity |= last.get('query_only') is not True
+                        booking_activity |= (last.get('phase') in BOOKING_PHASES or
+                                             last.get('event') in ('result_save_failed', 'state_update_failed') or
+                                             last.get('reason') == 'booking_unconfirmed' or
+                                             last.get('outcome') in ('booked', 'booking_unconfirmed'))
             else:
-                content = handle.read()
+                content = handle.read(8 * 1024 * 1024 + 1)
+                if len(content) > 8 * 1024 * 1024:
+                    raise RunSkipped('unsupported')
                 check_cancel(cancel)
                 digest.update(content)
                 size += len(content)
                 validate_record(json.loads(content))
     if last.get('event') not in ('run_finished', 'run_stopped', 'task_completed'):
         raise RunSkipped('unfinished')
+    if query_only and (not query_started or booking_activity):
+        raise RunSkipped('unsupported')
     date = datetime.fromtimestamp((directory / 'events.jsonl').stat().st_mtime, timezone(timedelta(hours=8)))
     return {'id': directory.name, 'bytes': size, 'digest': digest.hexdigest(),
             'date': date.strftime('%Y-%m-%d %H:%M:%S')}

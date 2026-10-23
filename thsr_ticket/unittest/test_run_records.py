@@ -98,7 +98,7 @@ def test_result_save_failure_still_shows_booking_code(runner, monkeypatch, capsy
     output = capsys.readouterr().out
     assert 'TEST1234' in output
     assert '完整結果無法存檔' in output
-    assert json.loads(runner.state_path.read_text())['status'] == 'booked'
+    assert json.loads(runner.state_path.read_text(encoding='utf-8'))['status'] == 'booked'
     runner.client.submit_ticket.assert_called_once()
 
 

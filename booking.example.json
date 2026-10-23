@@ -2,6 +2,8 @@
   "start_at": "2099-01-01T00:00:00+08:00",
   "interval_seconds": 0.5,
   "max_attempts": 60,
+  "network_failure_limit": 3,
+  "max_network_delay_seconds": 30,
   "ocr_model": "standard",
   "start_station": 2,
   "dest_station": 12,

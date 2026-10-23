@@ -11,10 +11,21 @@ from thsr_ticket.run_records import atomic_json
 PRIVATE_FIELDS = ('personal_id', 'phone_num')
 SCHEMA_VERSION = 1
 VERSION_KEY = '_schema_version'
+RESTORE_MARKER = '.travel-desk-restore-pending.json'
 
 
 class ConfigVersionError(ValueError):
     """Safe fixed text suitable for displaying without exposing file contents."""
+
+
+class ConfigRestoreError(ValueError):
+    pass
+
+
+def require_complete_restore(path):
+    marker = Path(path).parent / RESTORE_MARKER
+    if marker.exists() or marker.is_symlink():
+        raise ConfigRestoreError('這個資料夾的還原尚未完成，請保留資料並重新還原到新的資料夾。')
 
 
 def config_payload(data):
@@ -59,6 +70,7 @@ def is_protected(data):
 
 
 def read_config_data(path):
+    require_complete_restore(path)
     data = config_payload(json.loads(Path(path).read_text(encoding='utf-8-sig')))
     for key in PRIVATE_FIELDS:
         value = data.get(key)
@@ -74,6 +86,7 @@ def read_config_data(path):
 
 def write_config_data(path, data, protect=False):
     path = Path(path)
+    require_complete_restore(path)
     stored = config_payload(data)
     original = None
     if path.exists():

@@ -171,7 +171,15 @@ def record_entries(config_path, cancel=None, report=None):
             if current.get('status') == 'booked':
                 active_codes = booking_codes(current)
                 for code in active_codes:
-                    entries.append({'status': 'booked', 'code': code, 'current': True, 'ticket': {},
+                    stored_ticket = current.get('ticket') if isinstance(current.get('ticket'), dict) else {}
+                    fields = ('date', 'start_station', 'dest_station', 'train_id', 'depart_time', 'arrival_time',
+                              'seat', 'seat_class', 'price', 'payment_deadline', 'ticket_num_info')
+                    ticket = {key: str(stored_ticket.get(key, '')) for key in fields} if stored_ticket else {}
+                    if current.get('outbound_date'):
+                        ticket['requested_outbound_date'] = str(current['outbound_date'])
+                    entries.append({'status': 'booked', 'code': code, 'current': True, 'ticket': ticket,
+                                    'official_status': str(current.get('official_status', '')),
+                                    'verified_at': str(current.get('verified_at', '')),
                                     'fingerprint': pending_fingerprint(config_path)})
             else:
                 entries.append({'status': current.get('status', 'unknown'), 'code': '', 'current': True,
@@ -224,10 +232,11 @@ def record_entries(config_path, cancel=None, report=None):
                     match = {'status': 'history', 'code': ticket['id'], 'current': False, 'ticket': {}}
                     entries.append(match)
                     by_code[ticket['id']] = match
-                if not match['ticket']:
+                if not match['ticket'] or not match['ticket'].get('seat'):
                     match['ticket'] = {key: str(ticket.get(key, '')) for key in (
                         'date', 'start_station', 'dest_station', 'train_id', 'depart_time', 'arrival_time',
                         'seat', 'seat_class', 'price', 'payment_deadline', 'ticket_num_info')}
+                    match['ticket']['requested_outbound_date'] = str(data.get('requested_outbound_date', ''))
             report.accepted += 1
         except RecordVersionError:
             report.skip('version')

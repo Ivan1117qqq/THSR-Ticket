@@ -16,6 +16,7 @@ FIELDS = [
     ('elder_tickets', '敬老票'), ('college_tickets', '大學生票'),
     ('class_type', '車廂'), ('personal_id', '身分證字號'), ('phone_num', '手機（可留空）'),
     ('interval_seconds', '每輪等待秒數'), ('max_attempts', '最多查詢輪數'), ('ocr_model', 'OCR 模型'),
+    ('network_failure_limit', '連續網路失敗上限'), ('max_network_delay_seconds', '網路退避上限（秒）'),
 ]
 INTEGER_FIELDS = ('adult_tickets', 'child_tickets', 'disabled_tickets', 'elder_tickets',
                   'college_tickets', 'max_attempts')
@@ -34,6 +35,14 @@ def protected_config_path(path):
 
 def form_config(values):
     data = dict(values)
+    try:
+        data['network_failure_limit'] = int(data.get('network_failure_limit', 3))
+    except (ValueError, TypeError):
+        raise FieldError('network_failure_limit', '網路失敗上限須為整數。') from None
+    try:
+        data['max_network_delay_seconds'] = float(data.get('max_network_delay_seconds', 30))
+    except (ValueError, TypeError):
+        raise FieldError('max_network_delay_seconds', '網路退避上限須為秒數。') from None
     for name in INTEGER_FIELDS:
         try:
             data[name] = int(data[name])

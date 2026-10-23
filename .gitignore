@@ -20,3 +20,7 @@ booking.local.json
 *.config-backups/
 *.runs.history-backups/
 *.runs.operations/
+*.thsr-backup.zip
+.thsr-backup-*.tmp
+TravelDesk-Restored-*/
+.travel-desk-restore-pending.json

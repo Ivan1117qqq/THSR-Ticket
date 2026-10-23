@@ -52,6 +52,8 @@ class AutomationConfig(BaseModel):
     start_at: datetime
     interval_seconds: float = 1.0
     max_attempts: int = Field(60, ge=1, le=10000)
+    network_failure_limit: int = Field(3, ge=1, le=100)
+    max_network_delay_seconds: float = Field(30, ge=2, le=3600)
     ocr_model: Literal['standard', 'beta'] = 'standard'
     start_station: int
     dest_station: int
@@ -79,6 +81,18 @@ class AutomationConfig(BaseModel):
     def positive_interval(cls, value):
         if not math.isfinite(value) or value <= 0:
             raise ValueError('查詢間隔必須是大於 0 的有限秒數。')
+        return value
+
+    @validator('max_network_delay_seconds')
+    def finite_delay(cls, value):
+        if not math.isfinite(value):
+            raise ValueError('網路退避上限必須是有限秒數。')
+        return value
+
+    @validator('network_failure_limit', pre=True)
+    def integer_network_limit(cls, value):
+        if type(value) is not int:
+            raise ValueError('連續網路失敗上限必須是整數。')
         return value
 
     _times = validator('earliest_departure', 'latest_departure', allow_reuse=True)(clock_time)
@@ -305,10 +319,11 @@ class AutomationRunner:
                 if not transient_network_error(exc) or self.state_path.exists():
                     raise
                 network_failures += 1
-                if network_failures >= 3:
+                if network_failures >= self.config.network_failure_limit:
                     raise
                 self.retry(attempt, '查票連線暫時失敗', 'network_retry',
-                           delay=max(self.config.interval_seconds, 2 ** network_failures))
+                           delay=max(self.config.interval_seconds,
+                                     min(self.config.max_network_delay_seconds, 2 ** min(network_failures, 20))))
                 continue
             if selected is not None:
                 self.output(f'符合條件：{selected.id:04d}，{selected.depart} → {selected.arrive}')
@@ -330,6 +345,8 @@ class AutomationRunner:
         self.phase = 'retry_wait'
         delay = self.config.interval_seconds if delay is None else delay
         if attempt < self.config.max_attempts:
+            self.records.event('retry_scheduled', phase='retry_wait', attempt=attempt,
+                               outcome=outcome, delay_seconds=delay)
             self.output(f'{reason}，{delay:g} 秒後重新取得首頁與驗證碼。')
             self.sleep(delay)
         else:
@@ -347,7 +364,8 @@ class AutomationRunner:
         # Keep this marker even if the POST, parsing, or process fails afterwards.
         with self.state_path.open('x', encoding='utf-8') as handle:
             json.dump({'_record_version': 1, 'status': 'submission_pending', 'train_id': selected.id,
-                       'outbound_date': self.config.outbound_date, 'run_id': self.records.run_id}, handle)
+                       'outbound_date': self.config.outbound_date, 'run_id': self.records.run_id,
+                       'start_station': self.config.start_station, 'dest_station': self.config.dest_station}, handle)
             handle.flush()
             os.fsync(handle.fileno())
         try:
@@ -360,6 +378,15 @@ class AutomationRunner:
                 raise ValueError('缺少訂位代碼。')
         except Exception as exc:
             raise RuntimeError('訂位已嘗試送出，結果尚未確認；請至官網確認，勿直接重跑。') from exc
+        # Preserve the known code before printing or saving the richer result can fail.
+        try:
+            atomic_json(self.state_path, {'_record_version': 1, 'status': 'booked',
+                                          'booking_codes': [ticket.id for ticket in tickets],
+                                          'outbound_date': self.config.outbound_date,
+                                          'ticket': tickets[0]._asdict() if len(tickets) == 1 else {}})
+        except OSError:
+            self.records.event('state_update_failed')
+            self.output('訂位已成功，但狀態檔更新失敗；原防重送紀錄仍保留，請先確認訂位。')
         ShowBookingResult().show(tickets, output=self.output)
         self.output('訂位成功，已停止；尚未付款。')
         self.phase = 'save_result'
@@ -369,9 +396,3 @@ class AutomationRunner:
         except OSError:
             self.records.event('result_save_failed')
             self.output('訂位已成功，但完整結果無法存檔，請保留上方終端結果；勿重新訂位。')
-        try:
-            atomic_json(self.state_path, {'_record_version': 1, 'status': 'booked',
-                                          'booking_codes': [ticket.id for ticket in tickets]})
-        except OSError:
-            self.records.event('state_update_failed')
-            self.output('訂位已成功，但狀態檔更新失敗；原防重送紀錄仍保留，請先確認訂位。')
