@@ -35,6 +35,7 @@ from thsr_ticket.task_status import load_task, save_task, booking_guard, task_vi
 from thsr_ticket.record_search import RecordSearchIndex
 from thsr_ticket.journey_planning import PlanningIndex
 from thsr_ticket.desktop.planner import JourneyPlanner
+from thsr_ticket.desktop.dual_rail import DualRailController
 
 
 def defaults():
@@ -146,6 +147,11 @@ class DesktopController(QObject):
         self._recovery = ''
         self._closing = False
         self._thread = None
+        self._dual_closing = False
+        self._dual = DualRailController(self.data_dir, self.backup_context, self.prepare_dual, self.worker, self,
+                                        prepare_tra=lambda: (self.save_config(), self.path))
+        self._dual.changed.connect(self.changed.emit)
+        self._dual.finished.connect(self.refresh)
         self._received_done = False
         self._messages = queue.Queue()
         self._stop = threading.Event()
@@ -167,6 +173,16 @@ class DesktopController(QObject):
     @Property(QObject, constant=True)
     def planner(self):
         return self._planner
+
+    @Property(QObject, constant=True)
+    def dualRail(self):
+        return self._dual
+
+    def prepare_dual(self):
+        state = record_paths(self.path)[0]
+        if state.exists() or state.is_symlink():
+            raise ValueError('請先處理高鐵訂位紀錄。')
+        return self.save_config(), self.path
 
     def planning_context(self):
         return {'running': self.running, 'loading': self._record_loader.busy,
@@ -245,6 +261,10 @@ class DesktopController(QObject):
                         'query': 2, 'select_train': 3, 'submit_ticket': 4, 'parse_result': 4}.get(self._stage, 0)
         if self._summary_warning:
             view['detail'] += ' 任務摘要無法保存；重新開啟時可能無法顯示本次狀態。'
+        if self._dual.busy:
+            label = '台鐵' if set(self._dual.session.jobs) == {'tra'} else '雙鐵'
+            view.update(title=label + '工作執行中', detail='請開啟雙鐵面板查看本次工作進度。',
+                        label='查看任務進度', action='progress')
         return view
 
     def persist_task(self, code):
@@ -360,7 +380,7 @@ class DesktopController(QObject):
     @Property(bool, notify=changed)
     def running(self):
         return (self._running or self._storage.busy or self._backup.busy or self._management.busy
-                or self._retention.busy or self._ocr_lab.busy)
+                or self._retention.busy or self._ocr_lab.busy or (hasattr(self, '_dual') and self._dual.busy))
 
     @Property(bool, notify=changed)
     def error(self):
@@ -563,11 +583,17 @@ class DesktopController(QObject):
 
     @Slot()
     def stop(self):
+        if self._dual.busy:
+            self._dual.stop()
         self._stop.set()
         self.notify('正在停止，等待目前操作結束。已送出的訂位不會取消。')
 
     @Slot()
     def requestClose(self):
+        if self._dual.busy:
+            self._dual_closing = True
+            self._dual.stop()
+            return
         if self._management.busy or self._retention.busy or self._ocr_lab.busy:
             self._extras_closing = True
             self._management.stop()
@@ -622,6 +648,10 @@ class DesktopController(QObject):
 
     @Slot()
     def poll(self):
+        self._dual.poll()
+        if self._dual_closing and not self._dual.busy:
+            self._dual_closing = False
+            self.requestClose()
         self._management.poll()
         self._retention.poll()
         self._ocr_lab.poll()

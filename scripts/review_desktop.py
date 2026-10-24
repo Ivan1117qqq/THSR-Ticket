@@ -96,6 +96,7 @@ def review_controller(directory):
         raise StorageError('official_cancel_unavailable')
 
     controller.management.factory = no_browser
+    controller.dualRail.network_enabled = False
     return controller
 
 

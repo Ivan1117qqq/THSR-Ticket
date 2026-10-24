@@ -8,6 +8,7 @@ root = Path(SPECPATH)
 prepare(root)
 datas = [(str(root / 'thsr_ticket/desktop/qml'), 'thsr_ticket/desktop/qml')]
 datas += [(str(root / 'thsr_ticket/desktop/assets'), 'thsr_ticket/desktop/assets')]
+datas += [(str(root / 'thsr_ticket/configs/tra_stations.json'), 'thsr_ticket/configs')]
 icon = build_icon(root)
 datas += collect_data_files('ddddocr')
 binaries = collect_dynamic_libs('onnxruntime')

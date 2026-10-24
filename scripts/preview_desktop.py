@@ -96,6 +96,13 @@ def main():
             raise RuntimeError('Failed to save templates preview')
         QMetaObject.invokeMethod(window.findChild(QObject, 'templateDialog'), 'close')
         QTest.qWait(180)
+        dual_dialog = window.findChild(QObject, 'dualRailDialog')
+        QMetaObject.invokeMethod(dual_dialog, 'open')
+        QTest.qWait(180)
+        if not window.grabWindow().save(str(destination / f'dual-rail-scale-{args.scale}.png')):
+            raise RuntimeError('Failed to save dual rail preview')
+        QMetaObject.invokeMethod(dual_dialog, 'close')
+        QTest.qWait(180)
         deadline_dialog = window.findChild(QObject, 'deadlineDialog')
         deadline_dialog.setProperty('record', controller.planner.agenda['items'][0])
         window.findChild(QObject, 'localDeadlineInput').setProperty(

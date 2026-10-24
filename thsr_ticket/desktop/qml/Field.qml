@@ -6,6 +6,7 @@ ColumnLayout {
     id: field
     required property var backend
     required property string fieldKey
+    property string objectPrefix: ''
     property string label: ''
     property string hint: ''
     property var options: []
@@ -32,7 +33,7 @@ ColumnLayout {
         spacing: 6
         TextField {
             id: input
-            objectName: field.fieldKey
+            objectName: field.objectPrefix + field.fieldKey
             Accessible.name: field.label
             Accessible.description: field.hint
             visible: field.options.length === 0
@@ -58,7 +59,7 @@ ColumnLayout {
         }
         ComboBox {
             id: combo
-            objectName: 'choice_' + field.fieldKey
+            objectName: field.objectPrefix + 'choice_' + field.fieldKey
             Accessible.name: field.label
             Accessible.description: field.hint
             visible: field.options.length > 0
@@ -71,7 +72,7 @@ ColumnLayout {
             background: Rectangle { radius: 9; color: '#f9fbfd'; border.color: combo.activeFocus ? '#147d70' : '#e2e8ef' }
         }
         AppButton {
-            objectName: 'reveal_' + field.fieldKey
+            objectName: field.objectPrefix + 'reveal_' + field.fieldKey
             visible: field.secret
             implicitWidth: 44
             horizontalPadding: 0
@@ -95,13 +96,13 @@ ColumnLayout {
         }
         AppButton {
             id:calendarButton
-            objectName: 'calendar_' + field.fieldKey
+            objectName: field.objectPrefix + 'calendar_' + field.fieldKey
             visible: field.calendar; text: '日期'; horizontalPadding: 12
             Accessible.name: '選擇' + field.label
             onClicked: if(dateLoader.item) dateLoader.item.openDate(field.backend.form[field.fieldKey])
         }
         AppButton {
-            objectName: 'time_' + field.fieldKey
+            objectName: field.objectPrefix + 'time_' + field.fieldKey
             visible:field.timePicker; text:'時間'; horizontalPadding:12
             Accessible.name: '選擇' + field.label + '的時間'
             onClicked:{
@@ -114,13 +115,13 @@ ColumnLayout {
             visible: field.numeric
             spacing: 0
             Button {
-                objectName: 'increase_' + field.fieldKey
+                objectName: field.objectPrefix + 'increase_' + field.fieldKey
                 Accessible.name: '增加' + field.label
                 text: '+'; implicitWidth: 32; implicitHeight: 22
                 onClicked: field.backend.setField(field.fieldKey, String(Number(input.text) + 1))
             }
             Button {
-                objectName: 'decrease_' + field.fieldKey
+                objectName: field.objectPrefix + 'decrease_' + field.fieldKey
                 Accessible.name: '減少' + field.label
                 text: '-'; implicitWidth: 32; implicitHeight: 22
                 onClicked: field.backend.setField(field.fieldKey, String(Math.max(0, Number(input.text) - 1)))
@@ -160,7 +161,7 @@ ColumnLayout {
         active:field.calendar
         sourceComponent:Component {
             DatePicker {
-                objectName:'datePicker_'+field.fieldKey
+                objectName:field.objectPrefix+'datePicker_'+field.fieldKey
                 titleText:field.fieldKey === 'start_at' ? '選擇啟動日期' : '選擇'+field.label
                 onDateAccepted:function(value) {
                     if(field.fieldKey === 'start_at') value += ' '+(input.text.slice(11,19) || '00:00:00')

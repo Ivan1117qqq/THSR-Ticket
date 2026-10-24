@@ -8,7 +8,7 @@ ApplicationWindow {
     visible: true
     width: 1280; height: 880
     minimumWidth: 1080; minimumHeight: 720
-    title: 'Travel Desk · 高鐵訂票'
+    title: 'Travel Desk · 雙鐵旅程'
     color: '#f4f6fa'
     font.family: 'Microsoft JhengHei UI'
     font.pixelSize: 14
@@ -38,7 +38,7 @@ ApplicationWindow {
                     Layout.topMargin: 16
                 }
                 Text { text: 'Travel Desk'; color: 'white'; font.pixelSize: 23; font.bold: true; Layout.topMargin: 12 }
-                Text { text: '高鐵旅程管理'; color: '#8ba6b7'; font.pixelSize: 12; Layout.bottomMargin: 35 }
+                Text { text: '雙鐵旅程管理'; color: '#8ba6b7'; font.pixelSize: 12; Layout.bottomMargin: 35 }
                 Repeater {
                     model: ['旅程總覽', '新增行程', '任務進度', '我的訂位', '設定']
                     delegate: Button {
@@ -100,10 +100,12 @@ ApplicationWindow {
                 JourneyPage {
                     backend:window.backend
                     onTemplatesRequested:templateDialog.open()
+                    onDualRequested:dualRailDialog.open()
                 }
 
                 ProgressPage {
                     backend:window.backend
+                    onDualRequested:dualRailDialog.open()
                 }
 
                 BookingsPage {
@@ -162,4 +164,5 @@ ApplicationWindow {
     OcrLabDialog {backend:window.backend; id:ocrLabDialog}
     TemplateDialog {backend:window.backend; id:templateDialog}
     DeadlineDialog {backend:window.backend; id:deadlineDialog}
+    DualRailDialog {backend:window.backend; id:dualRailDialog}
 }

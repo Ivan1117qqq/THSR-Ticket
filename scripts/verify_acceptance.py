@@ -29,8 +29,10 @@ MANUAL = [
     {'id': 'U8', 'name': '常用行程範本與套用欄位保留', 'status': 'not_run'},
     {'id': 'U9', 'name': '行程月曆與繳費／核對待辦', 'status': 'not_run'},
     {'id': 'U10', 'name': '本機期限確認與繳費提醒實際通知', 'status': 'not_run'},
+    {'id': 'U11', 'name': '雙鐵設定、並行進度與台鐵人工核對', 'status': 'not_run'},
     {'id': 'L1', 'name': '官網核對、訂位／取消與回查', 'status': 'needs_data'},
     {'id': 'L2', 'name': '人工標註高鐵圖片的 OCR 評估', 'status': 'needs_data'},
+    {'id': 'L3', 'name': '台鐵真人驗證、後續確認與成功結果解析', 'status': 'needs_data'},
 ]
 
 
@@ -38,7 +40,7 @@ def source_snapshot(base):
     files = set()
     for name in ('thsr_ticket', 'scripts', '.github/workflows'):
         files.update(path for path in (base / name).rglob('*')
-                     if path.is_file() and path.suffix in ('.py', '.qml', '.svg', '.ps1', '.yml'))
+                     if path.is_file() and path.suffix in ('.py', '.qml', '.svg', '.ps1', '.yml', '.json'))
     files.update(base.glob('requirements*.txt'))
     files.update(base / name for name in ('setup.py', 'TravelDesk.spec', '.config/flake') if (base / name).is_file())
     digest = hashlib.sha256()

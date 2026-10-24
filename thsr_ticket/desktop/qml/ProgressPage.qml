@@ -5,12 +5,22 @@ import QtQuick.Layouts
 ScrollView {
     required property var backend
     id: progressPage
+    signal dualRequested()
     clip:true; contentWidth:availableWidth
     ColumnLayout {
         width:progressPage.availableWidth; spacing:20
         Item {height:8}
+        Card {
+            visible:backend.dualRail.hasSession; Layout.fillWidth:true; Layout.leftMargin:28; Layout.rightMargin:28
+            title:'雙鐵訂票工作'; subtitle:'兩邊各自執行、各成功一筆後停止。台鐵需要驗證時請切換至獨立 Chrome。'
+            RowLayout {
+                AppButton {text:'查看雙鐵進度與結果'; primary:true; onClicked:progressPage.dualRequested()}
+                AppButton {text:'全部停止'; visible:backend.dualRail.busy; onClicked:backend.dualRail.stop('')}
+            }
+        }
         TaskPanel {backend:progressPage.backend; Layout.fillWidth:true; Layout.leftMargin:28; Layout.rightMargin:28}
         Card {
+            visible:!backend.dualRail.busy
             Layout.fillWidth:true; Layout.leftMargin:28; Layout.rightMargin:28; title:'執行細節'
             RowLayout {
                 Layout.fillWidth:true

@@ -7,6 +7,7 @@ ScrollView {
     id: editor
     objectName: "journeyPage"
     signal templatesRequested()
+    signal dualRequested()
     function focusIssue(key) {
         var fields = {
             start_station:input_start_station,
@@ -53,6 +54,7 @@ ScrollView {
         RowLayout {
             Layout.fillWidth:true; Layout.leftMargin:28; Layout.rightMargin:28
             Caption {text:'快速套用常用路線，再選擇本次日期。'; Layout.fillWidth:true}
+            AppButton {objectName:'dualRailButton'; text:'雙鐵同時訂票'; primary:true; onClicked:editor.dualRequested()}
             AppButton {objectName:'journeyTemplatesButton'; text:'常用行程範本'; enabled:!backend.running; onClicked:editor.templatesRequested()}
         }
         Caption {visible:!!backend.issues.__root__; text:backend.issues.__root__ || ''; color:'#b65539'; Layout.leftMargin:28; Layout.rightMargin:28}
