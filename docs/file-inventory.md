@@ -1,5 +1,19 @@
 # 逐檔用途、清理依據與保留邊界
 
+## 2026-10-24 雙鐵新增檔案
+
+| 檔案 | 功能 |
+| --- | --- |
+| [dual_rail.py](../thsr_ticket/dual_rail.py) | 兩個獨立工作、停止事件、狀態佇列與高鐵 worker 介接。 |
+| [tra_booking.py](../thsr_ticket/tra_booking.py) | 台鐵設定／預填檢查、表單操作、公告接手、有限連線退避、送出前防重送、結果解析與紀錄保存。 |
+| [tra_stations.json](../thsr_ticket/configs/tra_stations.json) | 官網訂票表單的台鐵可選車站及輸入值，附來源與核對日期。 |
+| [desktop/dual_rail.py](../thsr_ticket/desktop/dual_rail.py) | Qt 雙鐵／台鐵單獨執行、視窗喚回事件、進度、人工核對、代碼複製與停止協調。 |
+| [DualRailDialog.qml](../thsr_ticket/desktop/qml/DualRailDialog.qml) | 雙鐵面板、台鐵表單、分別停止、代碼眼睛與封存確認。 |
+| [test_dual_rail.py](../thsr_ticket/unittest/test_dual_rail.py) | 真並行、互不停止、站碼、無位／成功契約與紀錄防護。 |
+| [test_dual_rail_desktop.py](../thsr_ticket/unittest/test_dual_rail_desktop.py) | Qt 預檢、忙碌互斥、關閉等待、人工核對及實際 QML 面板。 |
+| [test_tra_browser.py](../thsr_ticket/unittest/test_tra_browser.py) | 真 Chrome 操作表單及 POST 前保存；所有網路回應均被攔截。 |
+| [dual-rail.md](dual-rail.md) | 操作、保存、架構及真人／實站驗收限制。 |
+
 更新日期：2026-10-23；現行版本 0.4.0，歷史診斷與通知為尚未打包的原始碼更新。搭配 [完整開發指南](development-guide.md) 與 [後續優化計畫](roadmap.md) 閱讀。下方清理紀錄保留 0.3.1 階段的歷史依據。
 
 ## 如何判斷檔案能不能刪
